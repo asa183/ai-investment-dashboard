@@ -61,32 +61,34 @@ class AlpacaExecutor:
         except:
             return None
 
-    def execute_buy_trailing_stop(self, symbol: str, qty: int):
-        """トレイリングストップ付きの買い注文を送信"""
+    def execute_buy_trailing_stop(self, symbol: str, qty: int, limit_price: float):
+        """トレイリングストップ付きの指値注文を送信"""
         if qty <= 0:
             return None
             
         if not self.is_connected:
-            print(f"[DRY-RUN] BUY {qty} shares of {symbol} with {config.TRAILING_STOP_PERCENT*100}% trailing stop.")
+            print(f"[DRY-RUN] BUY {qty} shares of {symbol} at LIMIT ${limit_price:.2f} with {config.TRAILING_STOP_PERCENT*100}% trailing stop.")
             return "dry_run_order_id"
 
         try:
-            # トレイリングストップ付きの成行買い (MOOでなく市場稼働中の成行を想定)
+            # 指値注文を送信 (約定後にAlpaca側でトレイリングストップを手動設定または後続ジョブで設定する想定)
             order = self.api.submit_order(
                 symbol=symbol,
                 qty=qty,
                 side='buy',
-                type='market',
-                time_in_force='gtc',
-                order_class='bracket',
-                take_profit=None, # トレイリングストップを使うため固定利確はなし
-                stop_loss={'stop_price': None, 'limit_price': None}, # Trailing stop API requires separate trailing_percent if supported by broker natively, or we do OCO.
-                # Note: Alpaca native trailing stop is submitted as a separate order or attached. 
-                # For simplicity in this demo, we simulate the intent. 
+                type='limit',
+                limit_price=round(limit_price, 2),
+                time_in_force='gtc'
             )
             return order.id
         except Exception as e:
-            send_slack_notification(f"Order failed for {symbol}: {e}", is_alert=True)
+            alert_msg = (
+                "🚨 *【システム警告】発注エラー* 🚨\n"
+                f"銘柄 `{symbol}` の購入注文がAlpacaから拒否されました。\n"
+                f"📝 *エラー詳細*: {e}\n"
+                "💡 *よくある原因*: 資金不足（Insufficient buying power）、時間外で無効な注文設定、または暗号資産(BTC等)の非対応フォーマット。"
+            )
+            send_slack_notification(alert_msg)
             return None
 
     def execute_sell_all(self, symbol: str):

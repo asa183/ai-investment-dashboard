@@ -20,17 +20,21 @@ KILL_SWITCH_DRAWDOWN = -0.05   # ポートフォリオが5%減少したら全シ
 
 # --- 執行アルゴリズム設定 ---
 TRAILING_STOP_PERCENT = 0.05   # トレイリングストップ (最高値から5%下落で利確/損切り)
+LIMIT_SLIPPAGE_BUFFER = 1.005  # 指値注文のバッファ (現在価格の+0.5%を上限とする)
+PRE_MARKET_DROP_LIMIT = -3.0   # プレマーケットで前日比3%以上下落していたら発注をキャンセル
 
 # --- AIシグナル判定の閾値 ---
 VOLUME_SPIKE_MULTIPLIER = 1.5  # 出来高が過去平均の1.5倍以上で「急増」と判定
 
 # --- 監視対象銘柄リスト ---
 TARGET_SYMBOLS = [
-    "MSFT",
-    "PLTR",
-    "TSLA",
-    "TQQQ",
-    "SOXL",
-    "VHT",
-    "BTC-USD"
+    "MSFT",  # マイクロソフト
+    "PLTR",  # パランティア
+    "TSLA",  # テスラ
+    "NVDA",  # エヌビディア (NEW!)
+    "AAPL",  # アップル (NEW!)
+    "TQQQ",  # ナスダック3倍ブル
+    "SOXL",  # 半導体3倍ブル
+    "VHT",   # ヘルスケアETF
+    "BTC-USD" # ビットコイン
 ]
