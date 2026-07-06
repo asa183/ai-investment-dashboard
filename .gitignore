@@ -1,0 +1,12 @@
+# Python virtual environment
+.venv/
+env/
+venv/
+__pycache__/
+
+# Database
+*.db
+trading_history.db
+
+# OS generated files
+.DS_Store

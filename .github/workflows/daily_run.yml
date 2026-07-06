@@ -1,0 +1,37 @@
+name: Daily AI Investment Quant Bot
+
+on:
+  schedule:
+    # JSTの22:00はUTCの13:00 (平日のみ)
+    - cron: '0 13 * * 1-5'
+  workflow_dispatch: # 手動実行ボタン
+
+jobs:
+  run-quant-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+          
+      - name: Install Dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Main Bot
+        env:
+          ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
+          ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: python main_bot.py
+        
+      - name: Commit and Push Updated Report
+        run: |
+          git config --global user.name "AI Quant Bot"
+          git config --global user.email "bot@github.actions.local"
+          git add daily_report.md trading_history.db || true
+          git commit -m "chore: Update daily report and database [skip ci]" || true
+          git push origin main || true
