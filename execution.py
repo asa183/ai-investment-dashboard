@@ -62,12 +62,12 @@ class AlpacaExecutor:
             return None
 
     def execute_buy_trailing_stop(self, symbol: str, qty: int, limit_price: float):
-        """トレイリングストップ付きの指値注文を送信"""
+        """指値注文を送信 (トレイリングストップは事後設定)"""
         if qty <= 0:
             return None
             
         if not self.is_connected:
-            print(f"[DRY-RUN] BUY {qty} shares of {symbol} at LIMIT ${limit_price:.2f} with {config.TRAILING_STOP_PERCENT*100}% trailing stop.")
+            print(f"[DRY-RUN] BUY {qty} shares of {symbol} at LIMIT ${limit_price:.2f}.")
             return "dry_run_order_id"
 
         try:
@@ -102,4 +102,35 @@ class AlpacaExecutor:
             return "closed_all"
         except Exception as e:
             print(f"Failed to sell {symbol}: {e}")
+            return None
+
+    def attach_trailing_stop_if_needed(self, symbol: str, qty: int, trail_percent: float):
+        """保有株に対して、まだトレイリングストップ注文がなければ発注する"""
+        if not self.is_connected:
+            print(f"[DRY-RUN] Attach Trailing Stop: {symbol} Qty: {qty} TrailPct: {trail_percent:.2f}%")
+            return "dry_run_trail"
+
+        try:
+            # 現在のオープン注文を確認
+            open_orders = self.api.list_orders(status='open', symbols=[symbol])
+            has_trailing_stop = any(o.type == 'trailing_stop' for o in open_orders)
+            
+            if has_trailing_stop:
+                print(f"[{symbol}] Trailing stop already exists. Skipping.")
+                return None
+                
+            # トレイリングストップ売り注文を発注
+            order = self.api.submit_order(
+                symbol=symbol,
+                qty=qty,
+                side='sell',
+                type='trailing_stop',
+                trail_percent=round(trail_percent, 2),
+                time_in_force='gtc'
+            )
+            print(f"[{symbol}] Attached trailing stop: {trail_percent:.2f}%")
+            return order.id
+            
+        except Exception as e:
+            print(f"Failed to attach trailing stop for {symbol}: {e}")
             return None

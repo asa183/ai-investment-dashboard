@@ -93,20 +93,81 @@ def run_trade_mode(executor: AlpacaExecutor, equity: float, is_kill_switch_activ
 
 def run_summary_mode(executor: AlpacaExecutor, equity: float):
     """【ジョブ2】市場クローズ後のサマリー報告モード"""
-    # 簡易的に前日比を計算 (デモ用。厳密にはAlpaca APIのlast_equityを使うなどが必要)
     try:
         account = executor.api.get_account()
         last_equity = float(account.last_equity)
         daily_pnl = equity - last_equity
         daily_pnl_pct = (daily_pnl / last_equity) * 100 if last_equity > 0 else 0
+        
+        # 口座全体の含み損益
+        unrealized_pl = float(account.unrealized_pl)
+        unrealized_plpc = float(account.unrealized_plpc) * 100
     except:
         daily_pnl = 0.0
         daily_pnl_pct = 0.0
+        unrealized_pl = 0.0
+        unrealized_plpc = 0.0
+
+    # --- 個別銘柄の成績とトレイリングストップ（防衛線）の構築 ---
+    protection_messages = []
+    positions_messages = []
+    total_cost_basis = 0.0
+    total_market_value = 0.0
+    
+    if executor.is_connected:
+        try:
+            positions = executor.api.list_positions()
+            for pos in positions:
+                symbol = pos.symbol
+                qty = float(pos.qty)
+                current_price = float(pos.current_price)
+                avg_entry = float(pos.avg_entry_price)
+                pl_pct = float(pos.unrealized_plpc) * 100
+                
+                total_cost_basis += avg_entry * qty
+                total_market_value += current_price * qty
+                
+                # 保有銘柄の成績を記録
+                positions_messages.append(f"• *{symbol}*: {qty}株 ({pl_pct:+.2f}%)")
+                
+                # ボラティリティ（ATR）を取得
+                df = fetch_daily_data(symbol)
+                if df is not None:
+                    atr = calculate_atr(df['High'], df['Low'], df['Close'])
+                    trail_dollar = atr * config.ATR_TRAILING_MULTIPLIER
+                    trail_percent = (trail_dollar / current_price) * 100
+                    trail_percent = max(1.0, min(20.0, trail_percent))
+                    
+                    order_id = executor.attach_trailing_stop_if_needed(symbol, qty, trail_percent)
+                    if order_id:
+                        protection_messages.append(f"🛡️ {symbol}: {trail_percent:.1f}% の防衛線を設定")
+        except Exception as e:
+            print(f"Failed to set trailing stops or fetch positions: {e}")
+
+    # 株式ポートフォリオ単体の成績
+    if total_cost_basis > 0:
+        stock_pl = total_market_value - total_cost_basis
+        stock_pl_pct = (stock_pl / total_cost_basis) * 100
+        stock_stats_msg = f"🏢 *株式のみの運用益*: ${stock_pl:+,.2f} ({stock_pl_pct:+.2f}%)\n"
+    else:
+        stock_stats_msg = "🏢 *株式のみの運用益*: 保有株なし\n"
+
+    # メッセージの組み立て
+    pos_text = ""
+    if positions_messages:
+        pos_text = "\n*【保有銘柄の成績】*\n" + "\n".join(positions_messages) + "\n"
+
+    protection_text = ""
+    if protection_messages:
+        protection_text = "\n*【自動防衛システム発動】*\n" + "\n".join(protection_messages) + "\n"
 
     slack_msg = (
         "📈 *本日の運用サマリー (市場クローズ)*\n\n"
         f"💰 *総資産*: ${equity:,.2f}\n"
-        f"📊 *前日比*: ${daily_pnl:+,.2f} ({daily_pnl_pct:+.2f}%)\n\n"
+        f"📊 *前日比*: ${daily_pnl:+,.2f} ({daily_pnl_pct:+.2f}%)\n"
+        f"🌟 *通算含み損益*: ${unrealized_pl:+,.2f} ({unrealized_plpc:+.2f}%)\n"
+        f"{stock_stats_msg}"
+        f"{pos_text}{protection_text}\n"
         "※詳細はGitHubの `daily_report.md` を確認"
     )
     send_slack_notification(slack_msg)
