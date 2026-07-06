@@ -1,7 +1,7 @@
 import traceback
 import argparse
 import config
-from database import log_signal, log_order
+from database import log_signal, log_order, init_db
 from data_engine import fetch_daily_data, fetch_current_price, fetch_pre_market_price
 from alpha_strategy import evaluate_signals, calculate_atr, calculate_dynamic_position_size
 from execution import AlpacaExecutor, send_slack_notification
@@ -122,6 +122,7 @@ def main():
         return
 
     try:
+        init_db()  # 初回起動時やGitHub Actions用のDB初期化
         executor = AlpacaExecutor()
         portfolio = executor.get_portfolio_status()
         equity = portfolio['equity']
