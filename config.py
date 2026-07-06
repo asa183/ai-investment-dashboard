@@ -7,10 +7,10 @@ BASE_DIR = Path(__file__).resolve().parent
 # --- データベース設定 ---
 DB_PATH = BASE_DIR / "trading_history.db"
 
-# --- APIキー設定 (環境変数または直接入力) ---
+# --- Alpaca API 設定 ---
 ALPACA_API_KEY = os.getenv("ALPACA_API_KEY", "PKBHSMNNEVDBZEQMZJRN27RZGD")
 ALPACA_SECRET_KEY = os.getenv("ALPACA_SECRET_KEY", "CXVHjAdQW1s5aUUma6bow9Jq8FkBvwizeB21DHDyjej3")
-ALPACA_BASE_URL = "https://paper-api.alpaca.markets"  # デモ口座用URL
+ALPACA_BASE_URL = os.getenv("ALPACA_BASE_URL", "https://paper-api.alpaca.markets")
 
 SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL", "https://hooks.slack.com/services/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")
 
