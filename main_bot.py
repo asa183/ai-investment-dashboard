@@ -33,10 +33,10 @@ def generate_markdown_report(symbols_data: dict, total_equity: float, is_kill_sw
 def run_trade_mode(executor: AlpacaExecutor, equity: float, is_kill_switch_active: bool):
     """【ジョブ1】市場オープン中のトレード実行モード"""
     symbols_data = {}
-    slack_blocks = ["*🤖 AI Quant Bot - Trade Execution Report*"]
+    slack_blocks = ["*🤖 自動トレード実行レポート*"]
     
     if is_kill_switch_active:
-        slack_blocks.append("🚨 *【キルスイッチ発動中】* 異常ドローダウンを検知したため、すべての新規発注を見送りました。")
+        slack_blocks.append("🚨 *【警告】キルスイッチ作動中*: 異常な下落を検知したため新規購入を停止しています。")
 
     for symbol in config.TARGET_SYMBOLS:
         df = fetch_daily_data(symbol)
@@ -70,7 +70,7 @@ def run_trade_mode(executor: AlpacaExecutor, equity: float, is_kill_switch_activ
                 if order_id:
                     action_text = f"【自動発注】{shares}株を指値購入（上限${limit_price:.2f}）"
                     log_order(symbol, "buy", shares, 0, "limit_trailing", "submitted", order_id)
-                    slack_blocks.append(f"🟢 *BUY {symbol}*: {shares} shares (Limit: ${limit_price:.2f})\n> 理由: {signal_type}")
+                    slack_blocks.append(f"🟢 *【買】{symbol}*: {shares}株 (上限指値 ${limit_price:.2f})\n> 理由: {signal_type}")
                     
         elif "利確" in signal_type or "下落" in signal_type:
             pos = executor.get_position(symbol)
@@ -78,7 +78,7 @@ def run_trade_mode(executor: AlpacaExecutor, equity: float, is_kill_switch_activ
                 executor.execute_sell_all(symbol)
                 action_text = "【自動決済】保有する全株を売却（シグナル反転）"
                 log_order(symbol, "sell", float(pos.qty), 0, "market", "closed")
-                slack_blocks.append(f"🔴 *SELL {symbol}*: Closed all positions.\n> 理由: {signal_type}")
+                slack_blocks.append(f"🔴 *【売】{symbol}*: 全株売却（利確/損切り）\n> 理由: {signal_type}")
                 
         symbols_data[symbol] = {
             "signal": signal_type,
@@ -104,10 +104,10 @@ def run_summary_mode(executor: AlpacaExecutor, equity: float):
         daily_pnl_pct = 0.0
 
     slack_msg = (
-        "📈 *Market Close Summary (本日の最終結果)*\n\n"
+        "📈 *本日の運用サマリー (市場クローズ)*\n\n"
         f"💰 *総資産*: ${equity:,.2f}\n"
         f"📊 *前日比*: ${daily_pnl:+,.2f} ({daily_pnl_pct:+.2f}%)\n\n"
-        "※詳細な各銘柄のシグナルはGitHubの `daily_report.md` をご確認ください！"
+        "※詳細はGitHubの `daily_report.md` を確認"
     )
     send_slack_notification(slack_msg)
 
