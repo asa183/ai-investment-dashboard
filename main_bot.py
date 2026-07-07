@@ -20,22 +20,47 @@ def is_market_open_for_symbol(symbol: str) -> bool:
     else:
         return now.hour >= 21 or now.hour <= 7
 
-def generate_markdown_report(symbols_data: dict, total_equity: float):
+def generate_markdown_report(symbols_data: dict, total_equity: float, positions: dict = None):
     from data_engine import fetch_market_overview, fetch_usdjpy_rate
     overview = fetch_market_overview()
     rate = fetch_usdjpy_rate()
+    positions = positions or {}
+    
+    total_unrealized_jpy = 0.0
+    for symbol, pos in positions.items():
+        is_us = not symbol.endswith('.T')
+        fx = rate if is_us else 1.0
+        total_unrealized_jpy += pos['unrealized_pnl'] * fx
     
     report = [
         "# 🚀 AI Investment Quant Dashboard (Moomoo Edition)",
         "*(Automated Swing Trading System)*\n",
-        f"## 📊 ポートフォリオ概算総資産: ¥{total_equity:,.0f}\n",
+        "## 📊 ポートフォリオ状況",
+        f"- **概算総資産**: ¥{total_equity:,.0f}",
+        f"- **全体含み損益**: ¥{total_unrealized_jpy:,.0f}\n",
         "## 🌍 Market Overview",
         f"- **S&P 500**: {overview['SP500']:,.2f}",
         f"- **VIX (恐怖指数)**: {overview['VIX']:.2f}",
         f"- **米国10年債金利**: {overview['US10Y']:.3f}%",
         f"- **USD/JPY**: ¥{rate:.2f}\n",
-        "## 📈 本日のシグナルとアクション\n"
+        "## 💼 現在の保有ポジション\n"
     ]
+    
+    if positions:
+        report.append("| 銘柄 | 保有数 | 取得単価 | 現在値 | 含み損益 | 損益率 |")
+        report.append("|---|---|---|---|---|---|")
+        for symbol, pos in positions.items():
+            is_us = not symbol.endswith('.T')
+            fx = rate if is_us else 1.0
+            entry_jpy = pos['entry_price'] * fx
+            curr_jpy = pos['current_price'] * fx
+            pnl_jpy = pos['unrealized_pnl'] * fx
+            icon = "🟩" if pnl_jpy >= 0 else "🟥"
+            report.append(f"| {icon} **{symbol}** | {pos['qty']}株 | ¥{entry_jpy:,.0f} | ¥{curr_jpy:,.0f} | ¥{pnl_jpy:,.0f} | {pos['pnl_pct']:.2f}% |")
+    else:
+        report.append("現在保有している銘柄はありません。")
+        
+    report.append("\n## 📈 本日のシグナルとアクション\n")
     
     buys = []
     sells = []
@@ -52,7 +77,6 @@ def generate_markdown_report(symbols_data: dict, total_equity: float):
         else:
             holds.append(row)
             
-    # ヘッダー定義
     table_header = "| 銘柄 | シグナル | アクション | 詳細理由 |\n|---|---|---|---|"
     
     if buys:
@@ -155,7 +179,7 @@ def run_trade_mode(executor: MoomooExecutor, equity: float):
             "action": action_text
         }
         
-    generate_markdown_report(symbols_data, equity)
+    generate_markdown_report(symbols_data, equity, positions)
     
     if len(slack_blocks) > 1:
         send_slack_notification("\n\n".join(slack_blocks))
