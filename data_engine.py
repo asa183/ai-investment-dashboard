@@ -2,6 +2,8 @@ import yfinance as yf
 import pandas as pd
 from typing import Optional
 
+_usdjpy_cache = None
+
 def fetch_daily_data(symbol: str, periods: int = 100) -> Optional[pd.DataFrame]:
     """
     yfinanceを使用して日足データを取得します。
@@ -58,5 +60,22 @@ def fetch_usdjpy_rate() -> float:
             current_price = info.get("regularMarketPrice", 150.0) # Fallback
         return float(current_price)
     except Exception as e:
-        print(f"⚠️ Error fetching USD/JPY rate, using fallback 150.0: {e}")
         return 150.0
+
+def fetch_market_overview() -> dict:
+    """市場全体のサマリー（S&P500, VIX, 米10年債金利）を取得"""
+    try:
+        data = {}
+        for sym in ["^GSPC", "^VIX", "^TNX"]:
+            ticker = yf.Ticker(sym)
+            hist = ticker.history(period="1d")
+            data[sym] = float(hist['Close'].iloc[-1]) if not hist.empty else 0.0
+            
+        return {
+            "SP500": data.get("^GSPC", 0.0),
+            "VIX": data.get("^VIX", 0.0),
+            "US10Y": data.get("^TNX", 0.0)
+        }
+    except Exception as e:
+        print(f"Market Overview取得エラー: {e}")
+        return {"SP500": 0.0, "VIX": 0.0, "US10Y": 0.0}

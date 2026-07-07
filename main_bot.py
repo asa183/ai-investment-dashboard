@@ -21,10 +21,19 @@ def is_market_open_for_symbol(symbol: str) -> bool:
         return now.hour >= 21 or now.hour <= 7
 
 def generate_markdown_report(symbols_data: dict, total_equity: float):
+    from data_engine import fetch_market_overview, fetch_usdjpy_rate
+    overview = fetch_market_overview()
+    rate = fetch_usdjpy_rate()
+    
     report = [
         "# 🚀 AI Investment Quant Dashboard (Moomoo Edition)",
         "*(Automated Swing Trading System)*\n",
         f"## 📊 ポートフォリオ概算総資産: ¥{total_equity:,.0f}\n",
+        "## 🌍 Market Overview",
+        f"- **S&P 500**: {overview['SP500']:,.2f}",
+        f"- **VIX (恐怖指数)**: {overview['VIX']:.2f}",
+        f"- **米国10年債金利**: {overview['US10Y']:.3f}%",
+        f"- **USD/JPY**: ¥{rate:.2f}\n",
         "## 📈 本日のシグナルとアクション\n"
     ]
     
