@@ -41,3 +41,10 @@ def get_trailing_stop_update_msg(symbol: str, old_stop: float, new_stop: float) 
 def get_error_msg(context: str, error_details: str) -> str:
     """エラー発生時の通知"""
     return f"{TERM_ERROR} [{context}]\n詳細: {error_details}"
+
+INSUFFICIENT_FUNDS_TEMPLATE = """
+⚠️ *資金不足による見送り (機会損失)*
+銘柄: {symbol}
+理由: AIは強い買いシグナルを出しましたが、単元株({min_shares}株)を購入するための資金({required_funds})が許容リスクを超過するためスキップしました。
+現在価格: {current_price}
+"""

@@ -2,11 +2,23 @@ import traceback
 import argparse
 import config
 from database import log_signal, log_order, init_db
-from data_engine import fetch_daily_data, fetch_pre_market_price
+from data_engine import fetch_daily_data, fetch_pre_market_price, fetch_usdjpy_rate
 from alpha_strategy import evaluate_signals, calculate_atr, calculate_dynamic_position_size
 from execution import MoomooExecutor
 from notifier import send_slack_notification
 import messages
+import datetime
+
+def is_market_open_for_symbol(symbol: str) -> bool:
+    """現在時刻から、対象市場（US/JP）がオープンしているか判定（大まかな時差フィルター）"""
+    jst = datetime.timezone(datetime.timedelta(hours=9))
+    now = datetime.datetime.now(jst)
+    
+    is_jp = symbol.endswith('.T')
+    if is_jp:
+        return 8 <= now.hour <= 16
+    else:
+        return now.hour >= 21 or now.hour <= 7
 
 def generate_markdown_report(symbols_data: dict, total_equity: float):
     report = [
@@ -32,8 +44,12 @@ def run_trade_mode(executor: MoomooExecutor, equity: float):
     
     # 現在の全ポジションを取得
     positions = executor.get_positions()
+    usdjpy_rate = fetch_usdjpy_rate()
 
     for symbol in config.TARGET_SYMBOLS:
+        if not is_market_open_for_symbol(symbol):
+            continue
+            
         df = fetch_daily_data(symbol)
         if df is None:
             continue
@@ -58,15 +74,35 @@ def run_trade_mode(executor: MoomooExecutor, equity: float):
             else:
                 atr = calculate_atr(df['High'], df['Low'], df['Close'])
                 current_price = df['Close'].iloc[-1]
-                shares = calculate_dynamic_position_size(equity, config.MAX_PORTFOLIO_RISK_PCT, current_price, atr)
+                is_us_stock = not symbol.endswith('.T')
                 
-                # Moomoo経由で現物買い（成行）
-                executor.submit_order(symbol, shares, 'buy')
-                action_text = f"【自動発注】{shares}株を購入"
-                log_order(symbol, "buy", shares, current_price, "market", "submitted")
+                shares = calculate_dynamic_position_size(
+                    equity=equity, 
+                    current_price=current_price, 
+                    atr=atr, 
+                    is_us_stock=is_us_stock,
+                    usdjpy_rate=usdjpy_rate,
+                    risk_per_trade=config.MAX_PORTFOLIO_RISK_PCT
+                )
                 
-                msg = messages.get_trade_execution_msg(symbol, messages.TERM_BUY, shares, current_price)
-                slack_blocks.append(f"{msg}\n> 理由: {signal_type}")
+                if shares <= 0:
+                    req_funds = current_price * 100 if not is_us_stock else current_price
+                    action_text = "【見送り】資金不足（リスク超過）"
+                    msg = messages.INSUFFICIENT_FUNDS_TEMPLATE.format(
+                        symbol=symbol,
+                        min_shares=100 if not is_us_stock else 1,
+                        required_funds=f"¥{req_funds:,.0f}" if not is_us_stock else f"${req_funds:,.2f}",
+                        current_price=f"¥{current_price:,.0f}" if not is_us_stock else f"${current_price:,.2f}"
+                    )
+                    slack_blocks.append(msg)
+                else:
+                    # Moomoo経由で現物買い（成行）
+                    executor.submit_order(symbol, shares, 'buy')
+                    action_text = f"【自動発注】{shares}株を購入"
+                    log_order(symbol, "buy", shares, current_price, "market", "submitted")
+                    
+                    msg = messages.get_trade_execution_msg(symbol, messages.TERM_BUY, shares, current_price)
+                    slack_blocks.append(f"{msg}\n> 理由: {signal_type}")
                 
         elif "利確" in signal_type or "下落" in signal_type:
             if pos and pos['qty'] > 0:

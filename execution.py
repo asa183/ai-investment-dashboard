@@ -9,36 +9,44 @@ class MoomooExecutor:
     """
     def __init__(self, is_paper=False):
         self.env = TrdEnv.SIMULATE if is_paper else TrdEnv.REAL
-        # 取引コンテキストの初期化 (US市場向け)
-        self.trd_ctx = OpenSecTradeContext(
-            filter_trdmarket=TrdMarket.US, 
-            host=config.FUTU_HOST, 
-            port=config.FUTU_PORT
-        )
+        # 取引コンテキストの初期化 (日米両市場向け)
+        self.us_ctx = OpenSecTradeContext(filter_trdmarket=TrdMarket.US, host=config.FUTU_HOST, port=config.FUTU_PORT)
+        self.jp_ctx = OpenSecTradeContext(filter_trdmarket=TrdMarket.JP, host=config.FUTU_HOST, port=config.FUTU_PORT)
+
+    def _is_jp(self, symbol: str) -> bool:
+        return symbol.endswith('.T')
+
+    def _to_futu_symbol(self, symbol: str) -> str:
+        if self._is_jp(symbol):
+            return f"JP.{symbol.replace('.T', '')}"
+        return f"US.{symbol}"
+
+    def _from_futu_symbol(self, futu_symbol: str) -> str:
+        if futu_symbol.startswith('JP.'):
+            return f"{futu_symbol.replace('JP.', '')}.T"
+        elif futu_symbol.startswith('US.'):
+            return futu_symbol.replace('US.', '')
+        return futu_symbol
 
     def get_positions(self) -> dict:
         """
         現在の保有ポジションを取得し、共通の辞書形式で返却します。
         Returns:
-            { "AAPL": {"qty": 10, "entry_price": 150.0, "current_price": 155.0, "unrealized_pnl": 50.0, "pnl_pct": 3.33} }
+            { "AAPL": {"qty": 10, ...}, "7203.T": {"qty": 100, ...} }
         """
-        ret, data = self.trd_ctx.position_list_query(trd_env=self.env)
         positions = {}
-        
-        if ret == RET_OK:
-            for _, row in data.iterrows():
-                # "US.AAPL" などのコードから "AAPL" だけを抽出
-                symbol = row['code'].split('.')[-1]
-                positions[symbol] = {
-                    'qty': float(row['qty']),
-                    'entry_price': float(row['cost_price']),
-                    'current_price': float(row['nominal_price']),
-                    'unrealized_pnl': float(row['pl_val']),
-                    'pnl_pct': float(row['pl_ratio'])
-                }
-        else:
-            print(f"⚠️ ポジション取得エラー: {data}")
-            
+        for ctx in [self.us_ctx, self.jp_ctx]:
+            ret, data = ctx.position_list_query(trd_env=self.env)
+            if ret == RET_OK and not data.empty:
+                for _, row in data.iterrows():
+                    symbol = self._from_futu_symbol(row['code'])
+                    positions[symbol] = {
+                        'qty': float(row['qty']),
+                        'entry_price': float(row['cost_price']),
+                        'current_price': float(row['nominal_price']),
+                        'unrealized_pnl': float(row['pl_val']),
+                        'pnl_pct': float(row['pl_ratio'])
+                    }
         return positions
 
     def submit_order(self, symbol: str, qty: float, side: str):
@@ -46,12 +54,13 @@ class MoomooExecutor:
         現物（成行）注文を送信します。
         side: 'buy' または 'sell'
         """
-        futu_symbol = f"US.{symbol}"
+        futu_symbol = self._to_futu_symbol(symbol)
         trd_side = TrdSide.BUY if side.lower() == 'buy' else TrdSide.SELL
+        ctx = self.jp_ctx if self._is_jp(symbol) else self.us_ctx
         
-        # ※実際の本番取引では self.trd_ctx.unlock_trade("パスワードのMD5") が必要な場合があります。
+        # ※実際の本番取引では ctx.unlock_trade("パスワードのMD5") が必要な場合があります。
         
-        ret, data = self.trd_ctx.place_order(
+        ret, data = ctx.place_order(
             price=0.0,  # 成行の場合は0
             qty=qty,
             code=futu_symbol,
@@ -82,7 +91,8 @@ class MoomooExecutor:
 
     def get_portfolio_status(self) -> dict:
         """口座全体の資産状況を取得します"""
-        ret, data = self.trd_ctx.accinfo_query(trd_env=self.env)
+        # 口座全体の資産はどちらのコンテキストから呼んでも同じ総合口座の情報を返すと想定
+        ret, data = self.us_ctx.accinfo_query(trd_env=self.env)
         
         def safe_float(val):
             if val == 'N/A' or val is None:
@@ -102,5 +112,7 @@ class MoomooExecutor:
 
     def __del__(self):
         """終了処理: APIゲートウェイとの接続を安全に閉じます"""
-        if hasattr(self, 'trd_ctx'):
-            self.trd_ctx.close()
+        if hasattr(self, 'us_ctx'):
+            self.us_ctx.close()
+        if hasattr(self, 'jp_ctx'):
+            self.jp_ctx.close()

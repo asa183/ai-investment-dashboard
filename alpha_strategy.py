@@ -31,21 +31,44 @@ def calculate_atr(high: pd.Series, low: pd.Series, close: pd.Series, period: int
     atr = tr.rolling(window=period).mean()
     return float(atr.iloc[-1])
 
-def calculate_dynamic_position_size(total_equity: float, risk_pct: float, current_price: float, atr: float) -> int:
+def calculate_dynamic_position_size(
+    equity: float, 
+    current_price: float, 
+    atr: float, 
+    is_us_stock: bool = True,
+    usdjpy_rate: float = 150.0,
+    risk_per_trade: float = 0.02
+) -> int:
     """
-    ATRベースの動的ロット計算 (リスク・パリティ)
-    許容リスク額 = 総資産 * リスク許容度(%)
-    1株あたりのリスク = ATR * 2 (余裕を持たせたストップロス幅)
-    発注株数 = 許容リスク額 / 1株あたりのリスク
+    ATRベースの動的ポジションサイジング
+    リスク金額 = 総資金 * risk_per_trade
+    許容値幅 = ATR * 1.5
     """
-    if atr == 0 or current_price == 0:
+    if current_price <= 0 or atr <= 0:
         return 0
-    risk_amount = total_equity * risk_pct
-    risk_per_share = atr * 2.0 
+        
+    risk_amount = equity * risk_per_trade
+    max_investment = equity * 0.20 # 総資金の20%を上限とする
     
-    # 割り当て株数を計算し、整数に切り捨て
-    shares = int(risk_amount / risk_per_share)
-    return shares
+    if is_us_stock:
+        # 米国株の場合、価格とATRはUSD。equity(JPY)をUSDに変換して計算
+        risk_amount_usd = risk_amount / usdjpy_rate
+        max_investment_usd = max_investment / usdjpy_rate
+        
+        stop_loss_distance = atr * 1.5 
+        shares = int(risk_amount_usd / stop_loss_distance)
+        max_shares = int(max_investment_usd / current_price)
+        
+        return min(shares, max_shares)
+    else:
+        # 日本株の場合、価格とATRはJPY。
+        stop_loss_distance = atr * 1.5 
+        shares = int(risk_amount / stop_loss_distance)
+        max_shares = int(max_investment / current_price)
+        
+        final_shares = min(shares, max_shares)
+        # 日本株は単元株(100株)単位に切り捨てる
+        return (final_shares // 100) * 100
 
 def evaluate_signals(df: pd.DataFrame, volume_multiplier: float = 1.5):
     """

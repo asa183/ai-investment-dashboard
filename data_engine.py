@@ -29,15 +29,34 @@ def fetch_current_price(symbol: str) -> float:
         return 0.0
 
 def fetch_pre_market_price(symbol: str) -> dict:
-    """時間外取引のデータを取得します"""
+    """プレマーケット（時間外）の現在価格と変動率を取得する"""
     try:
         ticker = yf.Ticker(symbol)
         info = ticker.info
-        pre_price = info.get('preMarketPrice', 0)
-        reg_price = info.get('regularMarketPrice', 0)
-        if pre_price and reg_price:
-            pre_change = ((pre_price - reg_price) / reg_price) * 100
-            return {"price": pre_price, "change_pct": pre_change}
-        return {}
-    except:
-        return {}
+        current_price = info.get("currentPrice")
+        regular_close = info.get("previousClose")
+        
+        if current_price and regular_close:
+            change_pct = ((current_price - regular_close) / regular_close) * 100
+            return {
+                "price": current_price,
+                "change_pct": change_pct
+            }
+        return None
+    except Exception as e:
+        print(f"Error fetching pre-market price for {symbol}: {e}")
+        return None
+
+def fetch_usdjpy_rate() -> float:
+    """USD/JPYのリアルタイム為替レートを取得する"""
+    try:
+        ticker = yf.Ticker("JPY=X")
+        # fast info などの最新価格を取得
+        current_price = ticker.fast_info.get("last_price")
+        if not current_price:
+            info = ticker.info
+            current_price = info.get("regularMarketPrice", 150.0) # Fallback
+        return float(current_price)
+    except Exception as e:
+        print(f"⚠️ Error fetching USD/JPY rate, using fallback 150.0: {e}")
+        return 150.0
