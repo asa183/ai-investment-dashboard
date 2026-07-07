@@ -88,11 +88,15 @@ def run_trade_mode(executor: MoomooExecutor, equity: float):
                 if shares <= 0:
                     req_funds = current_price * 100 if not is_us_stock else current_price
                     action_text = "【見送り】資金不足（リスク超過）"
+                    
+                    req_funds_jpy = req_funds * usdjpy_rate if is_us_stock else req_funds
+                    curr_price_jpy = current_price * usdjpy_rate if is_us_stock else current_price
+                    
                     msg = messages.INSUFFICIENT_FUNDS_TEMPLATE.format(
                         symbol=symbol,
                         min_shares=100 if not is_us_stock else 1,
-                        required_funds=f"¥{req_funds:,.0f}" if not is_us_stock else f"${req_funds:,.2f}",
-                        current_price=f"¥{current_price:,.0f}" if not is_us_stock else f"${current_price:,.2f}"
+                        required_funds=f"¥{req_funds_jpy:,.0f}",
+                        current_price=f"¥{curr_price_jpy:,.0f}"
                     )
                     slack_blocks.append(msg)
                 else:
@@ -101,7 +105,8 @@ def run_trade_mode(executor: MoomooExecutor, equity: float):
                     action_text = f"【自動発注】{shares}株を購入"
                     log_order(symbol, "buy", shares, current_price, "market", "submitted")
                     
-                    msg = messages.get_trade_execution_msg(symbol, messages.TERM_BUY, shares, current_price)
+                    curr_price_jpy = current_price * usdjpy_rate if is_us_stock else current_price
+                    msg = messages.get_trade_execution_msg(symbol, messages.TERM_BUY, shares, curr_price_jpy)
                     slack_blocks.append(f"{msg}\n> 理由: {signal_type}")
                 
         elif "利確" in signal_type or "下落" in signal_type:
@@ -110,7 +115,9 @@ def run_trade_mode(executor: MoomooExecutor, equity: float):
                 action_text = "【自動決済】保有株をすべて売却"
                 log_order(symbol, "sell", pos['qty'], pos['current_price'], "market", "closed")
                 
-                msg = messages.get_trade_execution_msg(symbol, messages.TERM_SELL, pos['qty'], pos['current_price'])
+                is_us_stock = not symbol.endswith('.T')
+                curr_price_jpy = pos['current_price'] * usdjpy_rate if is_us_stock else pos['current_price']
+                msg = messages.get_trade_execution_msg(symbol, messages.TERM_SELL, pos['qty'], curr_price_jpy)
                 slack_blocks.append(f"{msg}\n> 理由: {signal_type}")
                 
         symbols_data[symbol] = {
@@ -126,19 +133,33 @@ def run_trade_mode(executor: MoomooExecutor, equity: float):
 
 def run_summary_mode(executor: MoomooExecutor, equity: float):
     """【ジョブ2】市場クローズ後のサマリー報告モード"""
-    portfolio_status = executor.get_portfolio_status()
-    unrealized_pl = portfolio_status.get('unrealized_pl', 0.0)
-    
-    # サマリーヘッダー
-    slack_msg = [messages.get_daily_summary_header(equity, unrealized_pl)]
-    
-    # 各銘柄の状況
+    usdjpy_rate = fetch_usdjpy_rate()
     positions = executor.get_positions()
+    
+    # ペーパートレードなどで全米株・日本株の含み損益を正確にJPYベースで合算する
+    total_unrealized_jpy = 0.0
     if positions:
         for symbol, pos in positions.items():
+            is_us_stock = not symbol.endswith('.T')
+            rate = usdjpy_rate if is_us_stock else 1.0
+            total_unrealized_jpy += pos['unrealized_pnl'] * rate
+
+    # サマリーヘッダー
+    slack_msg = [messages.get_daily_summary_header(equity, total_unrealized_jpy)]
+    
+    # 各銘柄の状況
+    if positions:
+        for symbol, pos in positions.items():
+            is_us_stock = not symbol.endswith('.T')
+            rate = usdjpy_rate if is_us_stock else 1.0
+            
+            entry_jpy = pos['entry_price'] * rate
+            curr_jpy = pos['current_price'] * rate
+            pnl_jpy = pos['unrealized_pnl'] * rate
+            
             pos_msg = messages.get_position_detail_msg(
-                symbol, pos['qty'], pos['entry_price'], pos['current_price'], 
-                pos['unrealized_pnl'], pos['pnl_pct']
+                symbol, pos['qty'], entry_jpy, curr_jpy, 
+                pnl_jpy, pos['pnl_pct']
             )
             slack_msg.append(pos_msg)
     else:
