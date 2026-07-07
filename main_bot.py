@@ -23,15 +23,35 @@ def is_market_open_for_symbol(symbol: str) -> bool:
 def generate_markdown_report(symbols_data: dict, total_equity: float):
     report = [
         "# 🚀 AI Investment Quant Dashboard (Moomoo Edition)",
-        "*(シンプル＆疎結合な120点満点アーキテクチャ)*\n",
-        f"## 📊 ポートフォリオ概算総資産: ${total_equity:,.2f}\n",
+        "*(Automated Swing Trading System)*\n",
+        f"## 📊 ポートフォリオ概算総資産: ¥{total_equity:,.0f}\n",
         "## 📈 本日のシグナルとアクション\n"
     ]
     
+    buys = []
+    sells = []
+    holds = []
+    
     for symbol, data in symbols_data.items():
-        report.append(f"### {symbol}")
-        report.append(f"- **シグナル**: {data['signal']} ({data['reason']})")
-        report.append(f"- **AIアクション**: {data['action']}\n")
+        action = data['action']
+        row = f"| **{symbol}** | {data['signal']} | {action} | {data['reason']} |"
+        
+        if "買" in action or "buy" in action.lower():
+            buys.append(row)
+        elif "決済" in action or "売" in action or "sell" in action.lower():
+            sells.append(row)
+        else:
+            holds.append(row)
+            
+    # ヘッダー定義
+    table_header = "| 銘柄 | シグナル | アクション | 詳細理由 |\n|---|---|---|---|"
+    
+    if buys:
+        report.extend(["### 🟢 買いシグナル (Buy)", table_header] + buys + ["\n"])
+    if sells:
+        report.extend(["### 🔴 決済・売りシグナル (Sell)", table_header] + sells + ["\n"])
+    if holds:
+        report.extend(["### ⚖️ 様子見・見送り (Hold / Skip)", table_header] + holds + ["\n"])
         
     output_path = config.BASE_DIR / "daily_report.md"
     with open(output_path, "w", encoding="utf-8") as f:
