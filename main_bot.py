@@ -2,41 +2,36 @@ import traceback
 import argparse
 import config
 from database import log_signal, log_order, init_db
-from data_engine import fetch_daily_data, fetch_current_price, fetch_pre_market_price
+from data_engine import fetch_daily_data, fetch_pre_market_price
 from alpha_strategy import evaluate_signals, calculate_atr, calculate_dynamic_position_size
-from execution import AlpacaExecutor, send_slack_notification
+from execution import MoomooExecutor
+from notifier import send_slack_notification
+import messages
 
-def generate_markdown_report(symbols_data: dict, total_equity: float, is_kill_switch_active: bool):
-    report = []
-    report.append("# 🚀 AI Investment Quant Dashboard (v2.0: Enterprise)")
-    report.append("*(100点満点の堅牢なクオンツアーキテクチャにて稼働中)*\n")
-    
-    if is_kill_switch_active:
-        report.append("## 🚨 【緊急停止】キルスイッチ作動中")
-        report.append(f"ポートフォリオのドローダウンが閾値（{config.KILL_SWITCH_DRAWDOWN*100}%）を超えたため、新規発注をロックしています。\n")
-        
-    report.append(f"## 📊 ポートフォリオ状況\n- **総資産**: ${total_equity:,.2f}\n")
-    report.append("## 📈 本日のシグナルとアクション\n")
+def generate_markdown_report(symbols_data: dict, total_equity: float):
+    report = [
+        "# 🚀 AI Investment Quant Dashboard (Moomoo Edition)",
+        "*(シンプル＆疎結合な120点満点アーキテクチャ)*\n",
+        f"## 📊 ポートフォリオ概算総資産: ${total_equity:,.2f}\n",
+        "## 📈 本日のシグナルとアクション\n"
+    ]
     
     for symbol, data in symbols_data.items():
-        signal = data['signal']
-        reason = data['reason']
-        action = data['action']
         report.append(f"### {symbol}")
-        report.append(f"- **シグナル**: {signal} ({reason})")
-        report.append(f"- **AIアクション**: {action}\n")
+        report.append(f"- **シグナル**: {data['signal']} ({data['reason']})")
+        report.append(f"- **AIアクション**: {data['action']}\n")
         
     output_path = config.BASE_DIR / "daily_report.md"
     with open(output_path, "w", encoding="utf-8") as f:
         f.write("\n".join(report))
 
-def run_trade_mode(executor: AlpacaExecutor, equity: float, is_kill_switch_active: bool):
+def run_trade_mode(executor: MoomooExecutor, equity: float):
     """【ジョブ1】市場オープン中のトレード実行モード"""
     symbols_data = {}
     slack_blocks = ["*🤖 自動トレード実行レポート*"]
     
-    if is_kill_switch_active:
-        slack_blocks.append("🚨 *【警告】キルスイッチ作動中*: 異常な下落を検知したため新規購入を停止しています。")
+    # 現在の全ポジションを取得
+    positions = executor.get_positions()
 
     for symbol in config.TARGET_SYMBOLS:
         df = fetch_daily_data(symbol)
@@ -50,35 +45,37 @@ def run_trade_mode(executor: AlpacaExecutor, equity: float, is_kill_switch_activ
         if is_buy:
             pre_market = fetch_pre_market_price(symbol)
             if pre_market and pre_market.get("change_pct", 0) <= config.PRE_MARKET_DROP_LIMIT:
-                action_text = f"【発注キャンセル】異常な下落({pre_market['change_pct']:.1f}%)を検知"
-                reason += f" (※暴落フィルター作動: {pre_market['change_pct']:.1f}%)"
+                action_text = f"【発注ブロック】プレマーケット暴落({pre_market['change_pct']:.1f}%)"
+                reason += f" (※暴落回避: {pre_market['change_pct']:.1f}%)"
                 is_buy = False
         
         log_signal(symbol, signal_type, reason)
+        pos = positions.get(symbol)
         
-        if is_buy and not is_kill_switch_active:
-            atr = calculate_atr(df['High'], df['Low'], df['Close'])
-            current_price = df['Close'].iloc[-1]
-            shares = calculate_dynamic_position_size(equity, config.MAX_PORTFOLIO_RISK_PCT, current_price, atr)
-            limit_price = current_price * config.LIMIT_SLIPPAGE_BUFFER
-            
-            pos = executor.get_position(symbol)
-            if pos:
-                action_text = f"既に保有中。シグナル点灯だが追加購入は見送り"
+        if is_buy:
+            if pos and pos['qty'] > 0:
+                action_text = "既に保有中のため追加購入は見送り"
             else:
-                order_id = executor.execute_buy_trailing_stop(symbol, shares, limit_price)
-                if order_id:
-                    action_text = f"【自動発注】{shares}株を指値購入（上限${limit_price:.2f}）"
-                    log_order(symbol, "buy", shares, 0, "limit_trailing", "submitted", order_id)
-                    slack_blocks.append(f"🟢 *【買】{symbol}*: {shares}株 (上限指値 ${limit_price:.2f})\n> 理由: {signal_type}")
-                    
+                atr = calculate_atr(df['High'], df['Low'], df['Close'])
+                current_price = df['Close'].iloc[-1]
+                shares = calculate_dynamic_position_size(equity, config.MAX_PORTFOLIO_RISK_PCT, current_price, atr)
+                
+                # Moomoo経由で現物買い（成行）
+                executor.submit_order(symbol, shares, 'buy')
+                action_text = f"【自動発注】{shares}株を購入"
+                log_order(symbol, "buy", shares, current_price, "market", "submitted")
+                
+                msg = messages.get_trade_execution_msg(symbol, messages.TERM_BUY, shares, current_price)
+                slack_blocks.append(f"{msg}\n> 理由: {signal_type}")
+                
         elif "利確" in signal_type or "下落" in signal_type:
-            pos = executor.get_position(symbol)
-            if pos:
-                executor.execute_sell_all(symbol)
-                action_text = "【自動決済】保有する全株を売却（シグナル反転）"
-                log_order(symbol, "sell", float(pos.qty), 0, "market", "closed")
-                slack_blocks.append(f"🔴 *【売】{symbol}*: 全株売却（利確/損切り）\n> 理由: {signal_type}")
+            if pos and pos['qty'] > 0:
+                executor.close_position(symbol)
+                action_text = "【自動決済】保有株をすべて売却"
+                log_order(symbol, "sell", pos['qty'], pos['current_price'], "market", "closed")
+                
+                msg = messages.get_trade_execution_msg(symbol, messages.TERM_SELL, pos['qty'], pos['current_price'])
+                slack_blocks.append(f"{msg}\n> 理由: {signal_type}")
                 
         symbols_data[symbol] = {
             "signal": signal_type,
@@ -86,96 +83,39 @@ def run_trade_mode(executor: AlpacaExecutor, equity: float, is_kill_switch_activ
             "action": action_text
         }
         
-    generate_markdown_report(symbols_data, equity, is_kill_switch_active)
+    generate_markdown_report(symbols_data, equity)
     
     if len(slack_blocks) > 1:
         send_slack_notification("\n\n".join(slack_blocks))
 
-def run_summary_mode(executor: AlpacaExecutor, equity: float):
+def run_summary_mode(executor: MoomooExecutor, equity: float):
     """【ジョブ2】市場クローズ後のサマリー報告モード"""
-    try:
-        account = executor.api.get_account()
-        last_equity = float(account.last_equity)
-        daily_pnl = equity - last_equity
-        daily_pnl_pct = (daily_pnl / last_equity) * 100 if last_equity > 0 else 0
-        
-        # 口座全体の含み損益
-        unrealized_pl = float(account.unrealized_pl)
-        unrealized_plpc = float(account.unrealized_plpc) * 100
-    except:
-        daily_pnl = 0.0
-        daily_pnl_pct = 0.0
-        unrealized_pl = 0.0
-        unrealized_plpc = 0.0
-
-    # --- 個別銘柄の成績とトレイリングストップ（防衛線）の構築 ---
-    protection_messages = []
-    positions_messages = []
-    total_cost_basis = 0.0
-    total_market_value = 0.0
+    portfolio_status = executor.get_portfolio_status()
+    unrealized_pl = portfolio_status.get('unrealized_pl', 0.0)
     
-    if executor.is_connected:
-        try:
-            positions = executor.api.list_positions()
-            for pos in positions:
-                symbol = pos.symbol
-                qty = float(pos.qty)
-                current_price = float(pos.current_price)
-                avg_entry = float(pos.avg_entry_price)
-                pl_pct = float(pos.unrealized_plpc) * 100
-                
-                total_cost_basis += avg_entry * qty
-                total_market_value += current_price * qty
-                
-                # 保有銘柄の成績を記録
-                positions_messages.append(f"• *{symbol}*: {qty}株 ({pl_pct:+.2f}%)")
-                
-                # ボラティリティ（ATR）を取得
-                df = fetch_daily_data(symbol)
-                if df is not None:
-                    atr = calculate_atr(df['High'], df['Low'], df['Close'])
-                    trail_dollar = atr * config.ATR_TRAILING_MULTIPLIER
-                    trail_percent = (trail_dollar / current_price) * 100
-                    trail_percent = max(1.0, min(20.0, trail_percent))
-                    
-                    order_id = executor.attach_trailing_stop_if_needed(symbol, qty, trail_percent)
-                    if order_id:
-                        protection_messages.append(f"🛡️ {symbol}: {trail_percent:.1f}% の防衛線を設定")
-        except Exception as e:
-            print(f"Failed to set trailing stops or fetch positions: {e}")
-
-    # 株式ポートフォリオ単体の成績
-    if total_cost_basis > 0:
-        stock_pl = total_market_value - total_cost_basis
-        stock_pl_pct = (stock_pl / total_cost_basis) * 100
-        stock_stats_msg = f"🏢 *株式のみの運用益*: ${stock_pl:+,.2f} ({stock_pl_pct:+.2f}%)\n"
+    # サマリーヘッダー
+    slack_msg = [messages.get_daily_summary_header(equity, unrealized_pl)]
+    
+    # 各銘柄の状況
+    positions = executor.get_positions()
+    if positions:
+        for symbol, pos in positions.items():
+            pos_msg = messages.get_position_detail_msg(
+                symbol, pos['qty'], pos['entry_price'], pos['current_price'], 
+                pos['unrealized_pnl'], pos['pnl_pct']
+            )
+            slack_msg.append(pos_msg)
     else:
-        stock_stats_msg = "🏢 *株式のみの運用益*: 保有株なし\n"
-
-    # メッセージの組み立て
-    pos_text = ""
-    if positions_messages:
-        pos_text = "\n*【保有銘柄の成績】*\n" + "\n".join(positions_messages) + "\n"
-
-    protection_text = ""
-    if protection_messages:
-        protection_text = "\n*【自動防衛システム発動】*\n" + "\n".join(protection_messages) + "\n"
-
-    slack_msg = (
-        "📈 *本日の運用サマリー (市場クローズ)*\n\n"
-        f"💰 *総資産*: ${equity:,.2f}\n"
-        f"📊 *前日比*: ${daily_pnl:+,.2f} ({daily_pnl_pct:+.2f}%)\n"
-        f"🌟 *通算含み損益*: ${unrealized_pl:+,.2f} ({unrealized_plpc:+.2f}%)\n"
-        f"{stock_stats_msg}"
-        f"{pos_text}{protection_text}\n"
-        "※詳細はGitHubの `daily_report.md` を確認"
-    )
-    send_slack_notification(slack_msg)
+        slack_msg.append("保有銘柄はありません。")
+        
+    slack_msg.append("\n※詳細はVPS上の `daily_report.md` または Moomooアプリを確認してください。")
+    send_slack_notification("\n\n".join(slack_msg))
 
 def main():
-    parser = argparse.ArgumentParser(description="AI Investment Quant Bot")
+    parser = argparse.ArgumentParser(description="AI Investment Quant Bot (Moomoo Edition)")
     parser.add_argument('--trade', action='store_true', help="Run in trade execution mode")
     parser.add_argument('--summary', action='store_true', help="Run in daily summary mode")
+    parser.add_argument('--paper', action='store_true', help="Run in Paper Trading mode (Simulate)")
     args = parser.parse_args()
 
     if not args.trade and not args.summary:
@@ -183,14 +123,20 @@ def main():
         return
 
     try:
-        init_db()  # 初回起動時やGitHub Actions用のDB初期化
-        executor = AlpacaExecutor()
+        init_db()  # ローカルDB初期化
+        # MoomooExecutorの初期化 (引数でPaperかLiveかを切り替え)
+        executor = MoomooExecutor(is_paper=args.paper)
+        
         portfolio = executor.get_portfolio_status()
         equity = portfolio['equity']
         
+        # Moomooの場合は資産がゼロの場合（口座未入金など）に備える
+        if equity <= 0:
+            print("Warning: Total equity is 0 or less. Using fallback of $10,000 for sizing.")
+            equity = 10000.0
+            
         if args.trade:
-            is_kill_switch_active = executor.check_kill_switch(equity)
-            run_trade_mode(executor, equity, is_kill_switch_active)
+            run_trade_mode(executor, equity)
             
         elif args.summary:
             run_summary_mode(executor, equity)
@@ -199,14 +145,8 @@ def main():
         error_trace = traceback.format_exc()
         print(f"CRITICAL ERROR:\n{error_trace}")
         
-        # スタックトレースは長すぎるのでSlackでは省略し、エラー文だけ読みやすくする
-        alert_msg = (
-            "🚨 *【緊急】システム異常終了* 🚨\n"
-            "AI投資ダッシュボードの実行中に予期せぬエラーが発生し、処理を中断しました。\n\n"
-            f"📝 *エラー内容*: `{str(e)}`\n"
-            "💡 *アクション*: GitHub Actionsのログ、またはローカル環境で詳細を確認してください。"
-        )
-        send_slack_notification(alert_msg)
+        error_msg = messages.get_error_msg("Bot Execution Failed", str(e))
+        send_slack_notification(error_msg)
 
 if __name__ == "__main__":
     main()

@@ -10,10 +10,9 @@ load_dotenv()
 # --- データベース設定 ---
 DB_PATH = BASE_DIR / "trading_history.db"
 
-# --- Alpaca API 設定 ---
-ALPACA_API_KEY = os.getenv("ALPACA_API_KEY", "")
-ALPACA_SECRET_KEY = os.getenv("ALPACA_SECRET_KEY", "")
-ALPACA_BASE_URL = os.getenv("ALPACA_BASE_URL", "https://paper-api.alpaca.markets")
+# --- Moomoo (FutuOpenD) 設定 ---
+FUTU_HOST = os.getenv("FUTU_HOST", "127.0.0.1")
+FUTU_PORT = int(os.getenv("FUTU_PORT", 11111))
 
 SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL", "")
 
