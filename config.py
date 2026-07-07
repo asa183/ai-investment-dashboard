@@ -20,6 +20,9 @@ SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL", "")
 MAX_PORTFOLIO_RISK_PCT = 0.02  # 1回のトレードで許容するリスク (総資産の2%)
 KILL_SWITCH_DRAWDOWN = -0.05   # ポートフォリオが5%減少したら全システム停止
 
+# ペーパートレード時の基準となる仮想総資産（円）
+PAPER_TRADE_BASE_EQUITY = 5000000.0
+
 # --- 執行アルゴリズム設定 ---
 ATR_TRAILING_MULTIPLIER = 2.0  # トレイリングストップ幅 (ATRの何倍の幅を持たせるか)
 LIMIT_SLIPPAGE_BUFFER = 1.005  # 指値注文のバッファ (現在価格の+0.5%を上限とする)

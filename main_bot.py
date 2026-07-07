@@ -163,13 +163,18 @@ def main():
         # MoomooExecutorの初期化 (引数でPaperかLiveかを切り替え)
         executor = MoomooExecutor(is_paper=args.paper)
         
-        portfolio = executor.get_portfolio_status()
-        equity = portfolio['equity']
-        
-        # Moomooの場合は資産がゼロの場合（口座未入金など）に備える
-        if equity <= 0:
-            print("Warning: Total equity is 0 or less. Using fallback of $10,000 for sizing.")
-            equity = 10000.0
+        if args.paper:
+            # ペーパートレード時はMoomooの残高を無視し、500万円ベースで計算
+            print(f"📊 ペーパートレードモード: 仮想総資産を ¥{config.PAPER_TRADE_BASE_EQUITY:,.0f} として稼働します。")
+            equity = config.PAPER_TRADE_BASE_EQUITY
+        else:
+            portfolio = executor.get_portfolio_status()
+            equity = portfolio['equity']
+            
+            # Moomooの場合は資産がゼロの場合（口座未入金など）に備える
+            if equity <= 0:
+                print("Warning: Total equity is 0 or less. Using fallback of ¥1,000,000 for sizing.")
+                equity = 1000000.0
             
         if args.trade:
             run_trade_mode(executor, equity)
