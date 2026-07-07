@@ -56,7 +56,8 @@ def generate_markdown_report(symbols_data: dict, total_equity: float, positions:
             curr_jpy = pos['current_price'] * fx
             pnl_jpy = pos['unrealized_pnl'] * fx
             icon = "🟩" if pnl_jpy >= 0 else "🟥"
-            report.append(f"| {icon} **{symbol}** | {pos['qty']}株 | ¥{entry_jpy:,.0f} | ¥{curr_jpy:,.0f} | ¥{pnl_jpy:,.0f} | {pos['pnl_pct']:.2f}% |")
+            name = config.SYMBOL_NAMES.get(symbol, symbol)
+            report.append(f"| {icon} **{name} ({symbol})** | {pos['qty']}株 | ¥{entry_jpy:,.0f} | ¥{curr_jpy:,.0f} | ¥{pnl_jpy:,.0f} | {pos['pnl_pct']:.2f}% |")
     else:
         report.append("現在保有している銘柄はありません。")
         
@@ -68,7 +69,8 @@ def generate_markdown_report(symbols_data: dict, total_equity: float, positions:
     
     for symbol, data in symbols_data.items():
         action = data['action']
-        row = f"| **{symbol}** | {data['signal']} | {action} | {data['reason']} |"
+        name = config.SYMBOL_NAMES.get(symbol, symbol)
+        row = f"| **{name} ({symbol})** | {data['signal']} | {action} | {data['reason']} |"
         
         if "買" in action or "buy" in action.lower():
             buys.append(row)
@@ -147,6 +149,7 @@ def run_trade_mode(executor: MoomooExecutor, equity: float):
                     
                     msg = messages.INSUFFICIENT_FUNDS_TEMPLATE.format(
                         symbol=symbol,
+                        name=config.SYMBOL_NAMES.get(symbol, symbol),
                         min_shares=100 if not is_us_stock else 1,
                         required_funds=f"¥{req_funds_jpy:,.0f}",
                         current_price=f"¥{curr_price_jpy:,.0f}"
