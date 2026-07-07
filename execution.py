@@ -83,11 +83,20 @@ class MoomooExecutor:
     def get_portfolio_status(self) -> dict:
         """口座全体の資産状況を取得します"""
         ret, data = self.trd_ctx.accinfo_query(trd_env=self.env)
+        
+        def safe_float(val):
+            if val == 'N/A' or val is None:
+                return 0.0
+            try:
+                return float(val)
+            except ValueError:
+                return 0.0
+
         if ret == RET_OK and not data.empty:
             row = data.iloc[0]
             return {
-                "equity": float(row.get('total_assets', 0.0)),
-                "unrealized_pl": float(row.get('unrealized_pl', 0.0))
+                "equity": safe_float(row.get('total_assets', 0.0)),
+                "unrealized_pl": safe_float(row.get('unrealized_pl', 0.0))
             }
         return {"equity": 0.0, "unrealized_pl": 0.0}
 
