@@ -18,6 +18,7 @@ class MoomooExecutor:
     後から改修しやすいよう、必要最小限の3つの関数のみを実装しています。
     """
     def __init__(self, is_paper=False):
+        self.is_paper = is_paper
         self.env = TrdEnv.SIMULATE if is_paper else TrdEnv.REAL
         # 取引コンテキストの初期化 (日米両市場向け)
         self.us_ctx = OpenSecTradeContext(filter_trdmarket=TrdMarket.US, host=config.FUTU_HOST, port=config.FUTU_PORT)
