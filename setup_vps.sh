@@ -25,9 +25,12 @@ mkdir -p /opt/futuopend
 cd /opt/futuopend
 # Download the latest Linux CLI version (Simulated download for now)
 wget -qO futuopend.tar.gz https://softwarefile.moomoo.com/FutuOpenD_8.3.4328_Ubuntu16.04.tar.gz || true
-if [ -f futuopend.tar.gz ]; then
-    tar -xzf futuopend.tar.gz
+if [ -s futuopend.tar.gz ] && file futuopend.tar.gz | grep -q "gzip"; then
+    tar -xzf futuopend.tar.gz || true
     rm futuopend.tar.gz
+else
+    echo "Failed to download FutuOpenD. Skipping extraction."
+    rm -f futuopend.tar.gz
 fi
 
 # Generate FutuOpenD.xml (assuming MOOMOO_ID and MOOMOO_PASSWORD_MD5 are exported)
