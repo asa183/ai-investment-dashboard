@@ -1,7 +1,13 @@
 #!/bin/bash
-# Slack URL修正スクリプト
+# Slack URL修正スクリプト (引数で受け取る版)
+if [ -z "$1" ]; then
+  echo "Error: Please provide the Slack webhook secret part!"
+  exit 1
+fi
+SECRET=$1
+FULL_URL="https://hooks.slack.com/services/$SECRET"
 echo "Fixing Slack Webhook URL in .env file..."
-sed -i 's|^SLACK_WEBHOOK_URL=.*|SLACK_WEBHOOK_URL=https://hooks.slack.com/services/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|' .env
+sed -i "s|^SLACK_WEBHOOK_URL=.*|SLACK_WEBHOOK_URL=$FULL_URL|" .env
 echo "Restarting Trading Bot..."
 docker compose restart trading-bot
 echo "Sending test notification to Slack..."
