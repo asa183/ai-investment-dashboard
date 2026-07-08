@@ -1,6 +1,7 @@
 # execution.py
 import config
 from moomoo import OpenSecTradeContext, TrdMarket, TrdSide, OrderType, TrdEnv, RET_OK
+from db_models import get_session, TradeHistory
 
 class MoomooExecutor:
     """
@@ -72,6 +73,19 @@ class MoomooExecutor:
         
         if ret == RET_OK:
             print(f"✅ 注文完了: {side.upper()} {qty} shares of {symbol}")
+            
+            # --- DBへ取引履歴を記録 ---
+            with get_session() as db:
+                trade = TradeHistory(
+                    symbol=symbol,
+                    side=side.lower(),
+                    qty=qty,
+                    price=0.0, # 成行のため0.0
+                    is_paper=(self.env == TrdEnv.SIMULATE)
+                )
+                db.add(trade)
+                db.commit()
+                
             return data
         else:
             print(f"⚠️ 注文エラー: {data}")

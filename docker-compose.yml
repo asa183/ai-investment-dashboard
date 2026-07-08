@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  trading-bot:
+    build: .
+    container_name: ai_trading_bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql://postgres:quant_admin_123@postgres-db:5432/trading_db
+      - PAPER_MODE=True
+      - FUTU_HOST=host.docker.internal
+    # VPSでFutuOpenD(Moomoo Gateway)がホスト上で動いている場合、以下を有効化
+    # network_mode: "host" 
+    # (ローカルMacでテストし、FutuOpenDもMac上で動いている場合は network_mode: "host" にするか、host.docker.internal を使用)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - .:/app
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+
+  postgres-db:
+    image: postgres:15-alpine
+    container_name: ai_postgres_db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=quant_admin_123
+      - POSTGRES_DB=trading_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  grafana:
+    image: grafana/grafana:10.0.0
+    container_name: ai_grafana
+    restart: unless-stopped
+    ports:
+      - "3030:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=quant_admin_123
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  grafana_data:

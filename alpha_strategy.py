@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+from config import SignalName
 
 def calculate_rsi(data: pd.Series, periods=14) -> pd.Series:
     delta = data.diff()
@@ -21,6 +22,35 @@ def calculate_bollinger_bands(data: pd.Series, window=20, num_std=2):
     upper_band = rolling_mean + (rolling_std * num_std)
     lower_band = rolling_mean - (rolling_std * num_std)
     return upper_band, lower_band
+
+def calculate_bb_width(upper_band: pd.Series, lower_band: pd.Series, sma: pd.Series) -> pd.Series:
+    return (upper_band - lower_band) / sma
+
+def calculate_adx(high: pd.Series, low: pd.Series, close: pd.Series, periods: int = 14) -> pd.Series:
+    """Calculate ADX (Average Directional Index)"""
+    plus_dm = high.diff()
+    minus_dm = low.diff()
+    
+    plus_dm[plus_dm < 0] = 0
+    minus_dm[minus_dm > 0] = 0
+    minus_dm = minus_dm.abs()
+    
+    plus_dm_true = np.where((plus_dm > minus_dm), plus_dm, 0)
+    minus_dm_true = np.where((minus_dm > plus_dm), minus_dm, 0)
+    
+    tr1 = high - low
+    tr2 = (high - close.shift(1)).abs()
+    tr3 = (low - close.shift(1)).abs()
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    
+    atr = tr.rolling(window=periods).mean()
+    
+    plus_di = 100 * (pd.Series(plus_dm_true, index=high.index).rolling(window=periods).mean() / atr)
+    minus_di = 100 * (pd.Series(minus_dm_true, index=low.index).rolling(window=periods).mean() / atr)
+    
+    dx = (abs(plus_di - minus_di) / (plus_di + minus_di)) * 100
+    adx = dx.rolling(window=periods).mean()
+    return adx
 
 def calculate_atr(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> float:
     """Average True Range (ATR) を計算し、最新の値を返す"""
@@ -70,20 +100,27 @@ def calculate_dynamic_position_size(
         # 日本株は単元株(100株)単位に切り捨てる
         return (final_shares // 100) * 100
 
-def evaluate_signals(df: pd.DataFrame, volume_multiplier: float = 1.5):
+def evaluate_signals(df: pd.DataFrame, volume_multiplier: float = 1.5, position_data: dict = None):
     """
     データフレームを評価し、シグナルを返す
     Returns: (signal_type, reason, is_buy)
     """
     if len(df) < 50:
-        return "⚖️ もみ合い・様子見", "データ不足", False
+        return SignalName.RANGE_BOUND, "データ不足", False
         
     close = df['Close']
+    high = df['High']
+    low = df['Low']
     volume = df['Volume']
     
     rsi = calculate_rsi(close)
     macd, macd_signal = calculate_macd(close)
     bb_upper, bb_lower = calculate_bollinger_bands(close)
+    sma20 = close.rolling(window=20).mean()
+    bb_width = calculate_bb_width(bb_upper, bb_lower, sma20)
+    adx = calculate_adx(high, low, close)
+    atr_val = calculate_atr(high, low, close)
+    
     sma50 = close.rolling(window=50).mean()
     sma25 = close.rolling(window=25).mean()
     
@@ -93,23 +130,49 @@ def evaluate_signals(df: pd.DataFrame, volume_multiplier: float = 1.5):
     
     vol_spike = current_volume > (avg_volume * volume_multiplier)
     
-    # シグナル判定ロジック（旧スクリプトからの移植）
+    # 1. 逃げ: ATR即時撤退（損切り）チェック
+    if position_data and position_data.get('qty', 0) > 0:
+        entry_price = position_data['entry_price']
+        stop_loss_price = entry_price - (atr_val * 1.5)
+        if current_price < stop_loss_price:
+            return SignalName.ATR_STOP_LOSS, f"現在値が安全圏(¥{stop_loss_price:.1f})を下回りました", False
+
+    # 2. 利確: 短期過熱チェック
+    if current_price > bb_upper.iloc[-1] or rsi.iloc[-1] > 75:
+        return SignalName.SHORT_TERM_OVERHEAT, f"BB上限突破 / RSI高水準({rsi.iloc[-1]:.0f})", False
+        
+    # 3. 逆張り: 大底反発
     if current_price < sma50.iloc[-1] and rsi.iloc[-1] < 40 and vol_spike and current_price > close.iloc[-2]:
-        return "🚀 大底反発シグナル", "50日線割れからの反発 / 直近の出来高急増を伴う", True
+        return SignalName.BOTTOM_REVERSAL, "50日線割れからの反発 / 直近の出来高急増", True
+
+    # --- 環境認識 (Regime Detection) ---
+    curr_adx = adx.iloc[-1] if not pd.isna(adx.iloc[-1]) else 0
+    avg_bbw = bb_width.rolling(window=20).mean().iloc[-1] if not pd.isna(bb_width.iloc[-1]) else 0
+    curr_bbw = bb_width.iloc[-1]
     
+    is_squeeze = curr_bbw < avg_bbw
+    is_ranging = curr_adx < 25 and is_squeeze
+
+    # 4. 攻め: ボラティリティ・ブレイクアウト
+    is_breaking_out = (current_price > bb_upper.iloc[-1]) and (current_volume > avg_volume * 2.0)
+    if is_ranging and is_breaking_out:
+        return SignalName.VOLATILITY_BREAKOUT, "エネルギー圧縮(スクイーズ)からの大陽線ブレイク", True
+
+    # 5. 守り: レンジ相場でのダマシ回避（以降のトレンドシグナルをブロック）
+    if is_ranging:
+        return SignalName.RANGE_BOUND, f"レンジ相場検知 (ADX:{curr_adx:.1f}, BB幅収縮)", False
+
+    # 6. 順張り: トレンドフォロー (MACD)
     if macd.iloc[-1] > macd_signal.iloc[-1] and macd.iloc[-2] <= macd_signal.iloc[-2]:
         if vol_spike:
-            return "⭐ MACDゴールデンクロス", "強い買いシグナル", True
+            return SignalName.MACD_GOLDEN_CROSS, "強い買いシグナル", True
         else:
-            return "💡 打診買いサイン", "MACDクロス(出来高不足)", True
+            return SignalName.MACD_TEST_BUY, "MACDクロス(出来高不足)", True
             
-    if current_price > bb_upper.iloc[-1] or rsi.iloc[-1] > 75:
-        return "🔥 短期過熱・利確推奨", f"BB上限突破 / RSI高水準({rsi.iloc[-1]:.0f})", False
-        
     if current_price < sma50.iloc[-1] and macd.iloc[-1] < macd_signal.iloc[-1]:
-        return "📉 下落トレンド", "50日線割れ＆MACD売り", False
+        return SignalName.TREND_BREAKDOWN, "50日線割れ＆MACD売り", False
         
     if current_price > sma25.iloc[-1] and macd.iloc[-1] > 0:
-        return "📈 トレンド継続", "25日線＆MACDプラス圏維持", False
+        return SignalName.TREND_CONTINUATION, "25日線＆MACDプラス圏維持", False
         
-    return "⚖️ もみ合い・様子見", "明確なシグナルなし", False
+    return SignalName.RANGE_BOUND, "明確なシグナルなし", False

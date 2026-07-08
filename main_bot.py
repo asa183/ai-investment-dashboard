@@ -1,13 +1,13 @@
 import traceback
 import argparse
 import config
-from database import log_signal, log_order, init_db
-from data_engine import fetch_daily_data, fetch_pre_market_price, fetch_usdjpy_rate
+from data_engine import fetch_daily_data_batch, fetch_daily_data, fetch_pre_market_price, fetch_usdjpy_rate
 from alpha_strategy import evaluate_signals, calculate_atr, calculate_dynamic_position_size
 from execution import MoomooExecutor
 from notifier import send_slack_notification
 import messages
 import datetime
+from db_models import init_db, get_session, SignalHistory, PortfolioHistory
 
 def is_market_open_for_symbol(symbol: str) -> bool:
     """現在時刻から、対象市場（US/JP）がオープンしているか判定（大まかな時差フィルター）"""
@@ -101,15 +101,22 @@ def run_trade_mode(executor: MoomooExecutor, equity: float):
     positions = executor.get_positions()
     usdjpy_rate = fetch_usdjpy_rate()
 
-    for symbol in config.TARGET_SYMBOLS:
-        if not is_market_open_for_symbol(symbol):
-            continue
-            
-        df = fetch_daily_data(symbol)
+    # オープン中の市場の銘柄だけを抽出
+    active_symbols = [sym for sym in config.TARGET_SYMBOLS if is_market_open_for_symbol(sym)]
+    
+    if active_symbols:
+        print(f"📊 {len(active_symbols)}銘柄の過去データをバッチ取得します...")
+        historical_data = fetch_daily_data_batch(active_symbols)
+    else:
+        historical_data = {}
+
+    for symbol in active_symbols:
+        df = historical_data.get(symbol)
         if df is None:
             continue
             
-        signal_type, reason, is_buy = evaluate_signals(df, config.VOLUME_SPIKE_MULTIPLIER)
+        pos = positions.get(symbol)
+        signal_type, reason, is_buy = evaluate_signals(df, config.VOLUME_SPIKE_MULTIPLIER, pos)
         action_text = "なし"
         
         # プレマーケット暴落フィルター
@@ -119,9 +126,6 @@ def run_trade_mode(executor: MoomooExecutor, equity: float):
                 action_text = f"【発注ブロック】プレマーケット暴落({pre_market['change_pct']:.1f}%)"
                 reason += f" (※暴落回避: {pre_market['change_pct']:.1f}%)"
                 is_buy = False
-        
-        log_signal(symbol, signal_type, reason)
-        pos = positions.get(symbol)
         
         if is_buy:
             if pos and pos['qty'] > 0:
@@ -159,17 +163,15 @@ def run_trade_mode(executor: MoomooExecutor, equity: float):
                     # Moomoo経由で現物買い（成行）
                     executor.submit_order(symbol, shares, 'buy')
                     action_text = f"【自動発注】{shares}株を購入"
-                    log_order(symbol, "buy", shares, current_price, "market", "submitted")
                     
                     curr_price_jpy = current_price * usdjpy_rate if is_us_stock else current_price
                     msg = messages.get_trade_execution_msg(symbol, messages.TERM_BUY, shares, curr_price_jpy)
                     slack_blocks.append(f"{msg}\n> 理由: {signal_type}")
                 
-        elif "利確" in signal_type or "下落" in signal_type:
+        elif signal_type in [config.SignalName.SHORT_TERM_OVERHEAT, config.SignalName.TREND_BREAKDOWN, config.SignalName.ATR_STOP_LOSS]:
             if pos and pos['qty'] > 0:
                 executor.close_position(symbol)
                 action_text = "【自動決済】保有株をすべて売却"
-                log_order(symbol, "sell", pos['qty'], pos['current_price'], "market", "closed")
                 
                 is_us_stock = not symbol.endswith('.T')
                 curr_price_jpy = pos['current_price'] * usdjpy_rate if is_us_stock else pos['current_price']
@@ -181,6 +183,18 @@ def run_trade_mode(executor: MoomooExecutor, equity: float):
             "reason": reason,
             "action": action_text
         }
+
+        # --- データベースへの記録 (Signal) ---
+        formatted_name = f"{config.SYMBOL_NAMES.get(symbol, symbol)} ({symbol})"
+        with get_session() as db:
+            sig = SignalHistory(
+                symbol=formatted_name,
+                signal_type=signal_type,
+                reason=reason,
+                action_taken=action_text
+            )
+            db.add(sig)
+            db.commit()
         
     generate_markdown_report(symbols_data, equity, positions)
     
@@ -192,16 +206,22 @@ def run_summary_mode(executor: MoomooExecutor, equity: float):
     usdjpy_rate = fetch_usdjpy_rate()
     positions = executor.get_positions()
     
-    # ペーパートレードなどで全米株・日本株の含み損益を正確にJPYベースで合算する
-    total_unrealized_jpy = 0.0
-    if positions:
-        for symbol, pos in positions.items():
-            is_us_stock = not symbol.endswith('.T')
-            rate = usdjpy_rate if is_us_stock else 1.0
-            total_unrealized_jpy += pos['unrealized_pnl'] * rate
-
+    status = executor.get_portfolio_status()
+    equity = status.get('equity', 0.0)
+    unrealized_pl = status.get('unrealized_pl', 0.0)
+    
+    # --- データベースへの記録 (Portfolio) ---
+    with get_session() as db:
+        port = PortfolioHistory(
+            total_equity=equity,
+            unrealized_pnl=unrealized_pl,
+            is_paper=executor.is_paper
+        )
+        db.add(port)
+        db.commit()
+    
     # サマリーヘッダー
-    slack_msg = [messages.get_daily_summary_header(equity, total_unrealized_jpy)]
+    slack_msg = [messages.get_daily_summary_header(equity, unrealized_pl)]
     
     # 各銘柄の状況
     if positions:
@@ -225,18 +245,20 @@ def run_summary_mode(executor: MoomooExecutor, equity: float):
     send_slack_notification("\n\n".join(slack_msg))
 
 def main():
-    parser = argparse.ArgumentParser(description="AI Investment Quant Bot (Moomoo Edition)")
-    parser.add_argument('--trade', action='store_true', help="Run in trade execution mode")
-    parser.add_argument('--summary', action='store_true', help="Run in daily summary mode")
-    parser.add_argument('--paper', action='store_true', help="Run in Paper Trading mode (Simulate)")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--trade", action="store_true", help="取引判定モードで実行")
+    parser.add_argument("--summary", action="store_true", help="サマリーモードで実行")
+    parser.add_argument("--paper", action="store_true", help="ペーパートレードモード（実際の発注は行わない）")
     args = parser.parse_args()
+
+    # DBの初期化
+    init_db()
 
     if not args.trade and not args.summary:
         print("Please specify --trade or --summary flag.")
         return
 
     try:
-        init_db()  # ローカルDB初期化
         # MoomooExecutorの初期化 (引数でPaperかLiveかを切り替え)
         executor = MoomooExecutor(is_paper=args.paper)
         

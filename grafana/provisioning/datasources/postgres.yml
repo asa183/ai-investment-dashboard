@@ -1,0 +1,15 @@
+apiVersion: 1
+
+datasources:
+  - name: PostgreSQL
+    type: postgres
+    url: postgres-db:5432
+    user: postgres
+    secureJsonData:
+      password: quant_admin_123
+    database: trading_db
+    jsonData:
+      sslmode: 'disable'
+      postgresVersion: 15
+    isDefault: true
+    editable: true

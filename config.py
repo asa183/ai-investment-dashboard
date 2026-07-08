@@ -17,19 +17,19 @@ FUTU_PORT = int(os.getenv("FUTU_PORT", 11111))
 SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL", "")
 
 # --- リスク管理・ポートフォリオ設定 ---
-MAX_PORTFOLIO_RISK_PCT = 0.02  # 1回のトレードで許容するリスク (総資産の2%)
-KILL_SWITCH_DRAWDOWN = -0.05   # ポートフォリオが5%減少したら全システム停止
+MAX_PORTFOLIO_RISK_PCT = float(os.getenv("MAX_PORTFOLIO_RISK_PCT", "0.02"))  # 1回のトレードで許容するリスク (総資産の2%)
+KILL_SWITCH_DRAWDOWN = float(os.getenv("KILL_SWITCH_DRAWDOWN", "-0.05"))   # ポートフォリオが5%減少したら全システム停止
 
 # ペーパートレード時の基準となる仮想総資産（円）
-PAPER_TRADE_BASE_EQUITY = 10000000.0
+PAPER_TRADE_BASE_EQUITY = float(os.getenv("PAPER_TRADE_BASE_EQUITY", "10000000.0"))
 
 # --- 執行アルゴリズム設定 ---
-ATR_TRAILING_MULTIPLIER = 2.0  # トレイリングストップ幅 (ATRの何倍の幅を持たせるか)
-LIMIT_SLIPPAGE_BUFFER = 1.005  # 指値注文のバッファ (現在価格の+0.5%を上限とする)
-PRE_MARKET_DROP_LIMIT = -3.0   # プレマーケットで前日比3%以上下落していたら発注をキャンセル
+ATR_TRAILING_MULTIPLIER = float(os.getenv("ATR_TRAILING_MULTIPLIER", "2.0"))  # トレイリングストップ幅 (ATRの何倍の幅を持たせるか)
+LIMIT_SLIPPAGE_BUFFER = float(os.getenv("LIMIT_SLIPPAGE_BUFFER", "1.005"))  # 指値注文のバッファ (現在価格の+0.5%を上限とする)
+PRE_MARKET_DROP_LIMIT = float(os.getenv("PRE_MARKET_DROP_LIMIT", "-3.0"))   # プレマーケットで前日比3%以上下落していたら発注をキャンセル
 
 # --- AIシグナル判定の閾値 ---
-VOLUME_SPIKE_MULTIPLIER = 1.5  # 出来高が過去平均の1.5倍以上で「急増」と判定
+VOLUME_SPIKE_MULTIPLIER = float(os.getenv("VOLUME_SPIKE_MULTIPLIER", "1.5"))  # 出来高が過去平均の1.5倍以上で「急増」と判定
 
 # --- 監視対象銘柄リスト ---
 TARGET_SYMBOLS = [
@@ -46,6 +46,8 @@ TARGET_SYMBOLS = [
     # --- 米国 AIデータセンターインフラ・冷却 ---
     "VRT",   # バーティブ (データセンター向け電源・冷却インフラ)
     "MOD",   # モーディン・マニュファクチャリング (液冷・熱管理技術)
+    "PENG",  # ペンギン・ソリューションズ (AI工場・HPCインフラ)
+    "WULF",  # テラウルフ (AI向け電力確保・データセンター)
     
     # --- 米国 サイバーセキュリティ・防衛・エネルギー ---
     "CRWD",  # クラウドストライク (AIサイバーセキュリティ)
@@ -86,6 +88,8 @@ SYMBOL_NAMES = {
     "ORCL": "オラクル",
     "VRT": "バーティブ",
     "MOD": "モーディン",
+    "PENG": "ペンギン",
+    "WULF": "テラウルフ",
     "CRWD": "クラウドストライク",
     "PANW": "パロアルト",
     "LMT": "ロッキード・マーチン",
@@ -106,3 +110,15 @@ SYMBOL_NAMES = {
     "7832.T": "バンダイナムコ",
     "8136.T": "サンリオ"
 }
+
+# --- シグナル定数（造語のハードコーディング防止用） ---
+class SignalName:
+    BOTTOM_REVERSAL = "🚀 大底反発シグナル"
+    MACD_GOLDEN_CROSS = "⭐ MACDゴールデンクロス"
+    MACD_TEST_BUY = "💡 打診買いサイン"
+    VOLATILITY_BREAKOUT = "💥 ボラティリティ・ブレイクアウト"
+    SHORT_TERM_OVERHEAT = "🔥 短期過熱・利確推奨"
+    TREND_BREAKDOWN = "📉 下落トレンド"
+    ATR_STOP_LOSS = "🛑 ATR即時撤退（損切り）"
+    TREND_CONTINUATION = "📈 トレンド継続"
+    RANGE_BOUND = "⚖️ もみ合い・様子見"
