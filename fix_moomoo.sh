@@ -4,6 +4,13 @@ mkdir -p /opt/futuopend
 cd /opt/futuopend
 curl -sL https://futuapi.com/releases/rs-v1.4.122/futu-opend-rs-1.4.122-linux-x86_64.tar.gz | tar -xz
 
+# バイナリを探して現在のディレクトリにコピー
+BINARY_PATH=$(find . -name "futu-opend-rs" -type f | head -n 1)
+if [ -n "$BINARY_PATH" ]; then
+    cp "$BINARY_PATH" ./futu-opend-rs_bin
+    chmod +x ./futu-opend-rs_bin
+fi
+
 echo "Generating Configuration..."
 cat <<EOF > FutuOpenD.xml
 <?xml version="1.0" encoding="utf-8"?>
@@ -16,6 +23,9 @@ EOF
 
 echo "Starting FutuOpenD-rs in background..."
 pkill -f futu-opend-rs || true
-nohup ./futu-opend-rs > futu.log 2>&1 &
+nohup ./futu-opend-rs_bin > futu.log 2>&1 &
+sleep 2
 
+echo "Checking if it started..."
+cat futu.log
 echo "Done! Moomoo Gateway is now running on port 11111."
