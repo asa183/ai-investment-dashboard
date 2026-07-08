@@ -1,4 +1,13 @@
 # execution.py
+import time
+import os
+import shutil
+
+# Moomoo SDKのFileExistsErrorバグを回避
+log_dir = os.path.expanduser('~/.com.moomoo.OpenD/Log')
+if os.path.exists(log_dir):
+    shutil.rmtree(log_dir, ignore_errors=True)
+
 import config
 from moomoo import OpenSecTradeContext, TrdMarket, TrdSide, OrderType, TrdEnv, RET_OK
 from db_models import get_session, TradeHistory
