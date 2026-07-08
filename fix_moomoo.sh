@@ -10,6 +10,7 @@ cat <<EOF > FutuOpenD.xml
 <xml>
   <login_account>asahi@syncra.co.jp</login_account>
   <login_pwd_md5>b051329aab4910e811257f520553bb08</login_pwd_md5>
+  <ip>0.0.0.0</ip>
 </xml>
 EOF
 
