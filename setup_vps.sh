@@ -31,6 +31,16 @@ if [ -f futuopend.tar.gz ]; then
 fi
 
 # Generate FutuOpenD.xml (assuming MOOMOO_ID and MOOMOO_PASSWORD_MD5 are exported)
+if [ -f /app/ai-investment-dashboard/.env ]; then
+    set -a
+    source /app/ai-investment-dashboard/.env
+    set +a
+elif [ -f .env ]; then
+    set -a
+    source .env
+    set +a
+fi
+
 MOOMOO_ID="${MOOMOO_ID:-}"
 MOOMOO_PASSWORD_MD5="${MOOMOO_PASSWORD_MD5:-}"
 
