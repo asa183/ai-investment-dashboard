@@ -8,14 +8,13 @@ services:
     env_file:
       - .env
     environment:
-      - DATABASE_URL=postgresql://postgres:quant_admin_123@postgres-db:5432/trading_db
+      - DATABASE_URL=postgresql://postgres:quant_admin_123@127.0.0.1:5432/trading_db
       - PAPER_MODE=True
-      - FUTU_HOST=host.docker.internal
+      - FUTU_HOST=127.0.0.1
     # VPSでFutuOpenD(Moomoo Gateway)がホスト上で動いている場合、以下を有効化
-    # network_mode: "host" 
-    # (ローカルMacでテストし、FutuOpenDもMac上で動いている場合は network_mode: "host" にするか、host.docker.internal を使用)
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    network_mode: "host" 
+    # extra_hosts:
+    #  - "host.docker.internal:host-gateway"
     volumes:
       - .:/app
     depends_on:
