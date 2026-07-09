@@ -31,24 +31,19 @@ def fetch_daily_data_batch(symbols: List[str], periods: int = 100) -> Dict[str, 
                         raise ValueError("Downloaded dataframe is empty (Possible IP Ban or Rate limit)")
                     
                     success_count = 0
-                    if len(chunk) == 1:
-                        df_clean = df.dropna(how='all')
-                        if not df_clean.empty:
-                            result[chunk[0]] = df_clean.tail(periods)
-                            success_count += 1
-                    else:
-                        for sym in chunk:
+                    for sym in chunk:
+                        if isinstance(df.columns, pd.MultiIndex):
                             if sym in df.columns.levels[0]:
                                 sym_df = df[sym].dropna(how='all')
                                 if not sym_df.empty:
                                     result[sym] = sym_df.tail(periods)
                                     success_count += 1
-                            elif len(chunk) > 1 and len(df.columns.levels) == 1:
-                                if sym in df.columns:
-                                    sym_df = pd.DataFrame(df[sym]).dropna(how='all')
-                                    if not sym_df.empty:
-                                        result[sym] = sym_df.tail(periods)
-                                        success_count += 1
+                        else:
+                            if len(chunk) == 1:
+                                sym_df = df.dropna(how='all')
+                                if not sym_df.empty:
+                                    result[sym] = sym_df.tail(periods)
+                                    success_count += 1
                     
                     if success_count == 0:
                         raise ValueError("No valid data retrieved in this chunk")
