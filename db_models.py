@@ -3,7 +3,9 @@ from datetime import datetime
 from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Boolean
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///trading_history.db")
+import config
+
+DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{config.DB_PATH}")
 
 engine = create_engine(DATABASE_URL, echo=False)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

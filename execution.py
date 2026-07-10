@@ -60,29 +60,53 @@ class MoomooExecutor:
                     }
         return positions
 
-    def submit_order(self, symbol: str, qty: float, side: str):
+    def get_available_power(self, is_us_stock: bool) -> float:
+        """指定市場の買付余力(購買力)を取得"""
+        ctx = self.us_ctx if is_us_stock else self.jp_ctx
+        ret, data = ctx.accinfo_query(trd_env=self.env)
+        if ret == RET_OK and not data.empty:
+            # MoomooAPIは 'power' または 'cash' で購買力を返す
+            power = data.iloc[0].get('power', 0.0)
+            if str(power) == 'N/A' or float(power) <= 0:
+                power = data.iloc[0].get('cash', 0.0)
+            return float(power) if str(power) != 'N/A' else 0.0
+        return 0.0
+
+    def submit_order(self, symbol: str, qty: float, side: str, current_price: float = 0.0):
         """
-        現物（成行）注文を送信します。
+        現物注文を送信します。安全のためBUYは指値(LIMIT)、SELLは成行(MARKET)を使用。
         side: 'buy' または 'sell'
         """
         futu_symbol = self._to_futu_symbol(symbol)
         trd_side = TrdSide.BUY if side.lower() == 'buy' else TrdSide.SELL
         ctx = self.jp_ctx if self._is_jp(symbol) else self.us_ctx
         
-        # ※実際の本番取引では ctx.unlock_trade("パスワードのMD5") が必要な場合があります。
+        is_jp = self._is_jp(symbol)
+        
+        # 安全な指値計算 (フラッシュクラッシュ防止)
+        if side.lower() == 'buy' and current_price > 0:
+            limit_price = current_price * config.LIMIT_SLIPPAGE_BUFFER
+            order_type = OrderType.NORMAL # 指値
+            # ティックサイズ丸め
+            limit_price = round(limit_price) if is_jp else round(limit_price, 2)
+        else:
+            limit_price = 0.0
+            order_type = OrderType.MARKET
         
         ret, data = ctx.place_order(
-            price=0.0,  # 成行の場合は0
+            price=limit_price,
             qty=qty,
             code=futu_symbol,
             trd_side=trd_side,
-            order_type=OrderType.MARKET,
+            order_type=order_type,
             adjust_limit=0,
             trd_env=self.env
         )
         
         if ret == RET_OK:
-            print(f"✅ 注文完了: {side.upper()} {qty} shares of {symbol}")
+            price_str = f"¥{limit_price}" if is_jp else f"${limit_price}"
+            order_info = f"LIMIT {price_str}" if order_type == OrderType.NORMAL else "MARKET"
+            print(f"✅ 注文完了: {side.upper()} {qty} shares of {symbol} at {order_info}")
             
             # --- DBへ取引履歴を記録 ---
             with get_session() as db:
@@ -90,7 +114,7 @@ class MoomooExecutor:
                     symbol=symbol,
                     side=side.lower(),
                     qty=qty,
-                    price=0.0, # 成行のため0.0
+                    price=limit_price,
                     is_paper=(self.env == TrdEnv.SIMULATE)
                 )
                 db.add(trade)
@@ -101,7 +125,7 @@ class MoomooExecutor:
             print(f"⚠️ 注文エラー: {data}")
             return None
 
-    def close_position(self, symbol: str):
+    def close_position(self, symbol: str, current_price: float = 0.0):
         """
         指定した銘柄の保有ポジションをすべて成行で決済します。
         """
@@ -110,7 +134,7 @@ class MoomooExecutor:
             qty = positions[symbol]['qty']
             if qty > 0:
                 print(f"🧹 全決済を実行します: {symbol} ({qty}株)")
-                return self.submit_order(symbol, qty, 'sell')
+                return self.submit_order(symbol, qty, 'sell', current_price)
         return None
 
     def get_portfolio_status(self) -> dict:

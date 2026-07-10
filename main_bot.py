@@ -110,6 +110,17 @@ def run_trade_mode(executor: MoomooExecutor, equity: float):
     else:
         historical_data = {}
 
+    # キルスイッチ判定
+    status = executor.get_portfolio_status()
+    unrealized_pl = status.get('unrealized_pl', 0.0)
+    current_equity = status.get('equity', equity)
+    drawdown = unrealized_pl / current_equity if current_equity > 0 else 0.0
+    kill_switch_active = False
+    
+    if drawdown <= config.KILL_SWITCH_DRAWDOWN:
+        kill_switch_active = True
+        slack_blocks.append(f"🚨 **【キルスイッチ作動】**\nポートフォリオの含み損({drawdown*100:.2f}%)が許容値({config.KILL_SWITCH_DRAWDOWN*100:.0f}%)を超過しました。\nシステムの安全のため、本日の新規買い注文は全てブロックされます。")
+
     for symbol in active_symbols:
         df = historical_data.get(symbol)
         if df is None:
@@ -119,6 +130,12 @@ def run_trade_mode(executor: MoomooExecutor, equity: float):
         signal_type, reason, is_buy = evaluate_signals(df, config.VOLUME_SPIKE_MULTIPLIER, pos)
         action_text = "なし"
         
+        # キルスイッチブロック
+        if is_buy and kill_switch_active:
+            action_text = "【発注ブロック】キルスイッチ作動中"
+            reason += " (※安全のため購入見送り)"
+            is_buy = False
+
         # プレマーケット暴落フィルター
         if is_buy:
             pre_market = fetch_pre_market_price(symbol)
@@ -134,6 +151,11 @@ def run_trade_mode(executor: MoomooExecutor, equity: float):
                 atr = calculate_atr(df['High'], df['Low'], df['Close'])
                 current_price = df['Close'].iloc[-1]
                 is_us_stock = not symbol.endswith('.T')
+                cash_power = executor.get_available_power(is_us_stock)
+                
+                # ペーパートレードの場合は現金残高の制約を無視
+                if executor.is_paper:
+                    cash_power = equity
                 
                 shares = calculate_dynamic_position_size(
                     equity=equity, 
@@ -141,7 +163,8 @@ def run_trade_mode(executor: MoomooExecutor, equity: float):
                     atr=atr, 
                     is_us_stock=is_us_stock,
                     usdjpy_rate=usdjpy_rate,
-                    risk_per_trade=config.MAX_PORTFOLIO_RISK_PCT
+                    risk_per_trade=config.MAX_PORTFOLIO_RISK_PCT,
+                    available_cash=cash_power
                 )
                 
                 if shares <= 0:

@@ -48,7 +48,10 @@ def calculate_adx(high: pd.Series, low: pd.Series, close: pd.Series, periods: in
     plus_di = 100 * (pd.Series(plus_dm_true, index=high.index).rolling(window=periods).mean() / atr)
     minus_di = 100 * (pd.Series(minus_dm_true, index=low.index).rolling(window=periods).mean() / atr)
     
-    dx = (abs(plus_di - minus_di) / (plus_di + minus_di)) * 100
+    dx_den = plus_di + minus_di
+    dx_val = np.where(dx_den == 0, 0, (abs(plus_di - minus_di) / dx_den) * 100)
+    
+    dx = pd.Series(dx_val, index=high.index)
     adx = dx.rolling(window=periods).mean()
     return adx
 
@@ -67,7 +70,8 @@ def calculate_dynamic_position_size(
     atr: float, 
     is_us_stock: bool = True,
     usdjpy_rate: float = 150.0,
-    risk_per_trade: float = 0.02
+    risk_per_trade: float = 0.02,
+    available_cash: float = None
 ) -> int:
     """
     ATRベースの動的ポジションサイジング
@@ -79,6 +83,10 @@ def calculate_dynamic_position_size(
         
     risk_amount = equity * risk_per_trade
     max_investment = equity * 0.20 # 総資金の20%を上限とする
+    
+    if available_cash is not None:
+        max_investment = min(max_investment, available_cash)
+
     
     if is_us_stock:
         # 米国株の場合、価格とATRはUSD。equity(JPY)をUSDに変換して計算
@@ -131,9 +139,10 @@ def evaluate_signals(df: pd.DataFrame, volume_multiplier: float = 1.5, position_
     vol_spike = current_volume > (avg_volume * volume_multiplier)
     
     # 1. 逃げ: ATR即時撤退（損切り）チェック
+    import config as cfg
     if position_data and position_data.get('qty', 0) > 0:
         entry_price = position_data['entry_price']
-        stop_loss_price = entry_price - (atr_val * 1.5)
+        stop_loss_price = entry_price - (atr_val * cfg.ATR_TRAILING_MULTIPLIER)
         if current_price < stop_loss_price:
             return SignalName.ATR_STOP_LOSS, f"現在値が安全圏(¥{stop_loss_price:.1f})を下回りました", False
 
@@ -173,6 +182,9 @@ def evaluate_signals(df: pd.DataFrame, volume_multiplier: float = 1.5, position_
         return SignalName.TREND_BREAKDOWN, "50日線割れ＆MACD売り", False
         
     if current_price > sma25.iloc[-1] and macd.iloc[-1] > 0:
+        # テスト運用向け：上昇トレンド中で、RSIが55以下（少し下がった状態）から反発した時に「押し目買い」
+        if rsi.iloc[-1] < 60 and rsi.iloc[-1] > rsi.iloc[-2] and current_price > close.iloc[-2]:
+            return "📈 押し目買いサイン", "上昇トレンド中の短期的な下落からの反発検知", True
         return SignalName.TREND_CONTINUATION, "25日線＆MACDプラス圏維持", False
         
     return SignalName.RANGE_BOUND, "明確なシグナルなし", False

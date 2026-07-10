@@ -106,8 +106,15 @@ def fetch_pre_market_price(symbol: str) -> dict:
         print(f"Error fetching pre-market price for {symbol}: {e}")
         return None
 
+_usdjpy_cache_val = None
+_usdjpy_cache_time = 0
+
 def fetch_usdjpy_rate() -> float:
-    """USD/JPYのリアルタイム為替レートを取得する"""
+    """USD/JPYのリアルタイム為替レートを取得する（キャッシュ付き）"""
+    global _usdjpy_cache_val, _usdjpy_cache_time
+    if _usdjpy_cache_val and (time.time() - _usdjpy_cache_time) < 3600:
+        return _usdjpy_cache_val
+
     try:
         ticker = yf.Ticker("JPY=X")
         # fast info などの最新価格を取得
@@ -115,12 +122,22 @@ def fetch_usdjpy_rate() -> float:
         if not current_price:
             info = ticker.info
             current_price = info.get("regularMarketPrice", 150.0) # Fallback
-        return float(current_price)
+        
+        _usdjpy_cache_val = float(current_price)
+        _usdjpy_cache_time = time.time()
+        return _usdjpy_cache_val
     except Exception as e:
-        return 150.0
+        return _usdjpy_cache_val if _usdjpy_cache_val else 150.0
+
+_overview_cache_val = None
+_overview_cache_time = 0
 
 def fetch_market_overview() -> dict:
-    """市場全体のサマリー（S&P500, VIX, 米10年債金利）を取得"""
+    """市場全体のサマリー（S&P500, VIX, 米10年債金利）を取得（キャッシュ付き）"""
+    global _overview_cache_val, _overview_cache_time
+    if _overview_cache_val and (time.time() - _overview_cache_time) < 3600:
+        return _overview_cache_val
+
     try:
         data = {}
         for sym in ["^GSPC", "^VIX", "^TNX"]:
@@ -129,11 +146,13 @@ def fetch_market_overview() -> dict:
             hist = ticker.history(period="1d")
             data[sym] = float(hist['Close'].iloc[-1]) if not hist.empty else 0.0
             
-        return {
+        _overview_cache_val = {
             "SP500": data.get("^GSPC", 0.0),
             "VIX": data.get("^VIX", 0.0),
             "US10Y": data.get("^TNX", 0.0)
         }
+        _overview_cache_time = time.time()
+        return _overview_cache_val
     except Exception as e:
         print(f"Market Overview取得エラー: {e}")
-        return {"SP500": 0.0, "VIX": 0.0, "US10Y": 0.0}
+        return _overview_cache_val if _overview_cache_val else {"SP500": 0.0, "VIX": 0.0, "US10Y": 0.0}
