@@ -47,19 +47,19 @@ def schedule_jobs():
     if is_paper:
         summary_cmd.append("--paper")
 
-    # 1. 毎朝 04:45 に「米国株の取引判定」を実行
-    schedule.every().monday.at("04:45").do(run_task, trade_cmd)
+    # 1. 毎朝 04:45 に「米国株の取引判定」を実行 (米国時間の月〜金引け前 = 日本時間の火〜土)
     schedule.every().tuesday.at("04:45").do(run_task, trade_cmd)
     schedule.every().wednesday.at("04:45").do(run_task, trade_cmd)
     schedule.every().thursday.at("04:45").do(run_task, trade_cmd)
     schedule.every().friday.at("04:45").do(run_task, trade_cmd)
+    schedule.every().saturday.at("04:45").do(run_task, trade_cmd)
     
     # 2. 毎朝 06:00 に「米国市場終了後のサマリー通知」を実行
-    schedule.every().monday.at("06:00").do(run_task, summary_cmd)
     schedule.every().tuesday.at("06:00").do(run_task, summary_cmd)
     schedule.every().wednesday.at("06:00").do(run_task, summary_cmd)
     schedule.every().thursday.at("06:00").do(run_task, summary_cmd)
     schedule.every().friday.at("06:00").do(run_task, summary_cmd)
+    schedule.every().saturday.at("06:00").do(run_task, summary_cmd)
 
     # 3. 毎昼 14:45 に「日本株の取引判定」を実行
     schedule.every().monday.at("14:45").do(run_task, trade_cmd)
